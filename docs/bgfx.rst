@@ -170,6 +170,7 @@ Individual capability flags.
 .. doxygendefine:: BGFX_CAPS_PRIMITIVE_ID
 .. doxygendefine:: BGFX_CAPS_RENDERER_MULTITHREADED
 .. doxygendefine:: BGFX_CAPS_SHADER_F16
+.. doxygendefine:: BGFX_CAPS_SUBPASS
 .. doxygendefine:: BGFX_CAPS_SWAP_CHAIN
 .. doxygendefine:: BGFX_CAPS_TEXTURE_CUBE_ARRAY
 .. doxygendefine:: BGFX_CAPS_TEXTURE_DIRECT_ACCESS
@@ -271,6 +272,7 @@ A View's state is preserved between frames.
 .. doxygenfunction:: bgfx::setViewClear(ViewId _id, uint16_t _flags, float _depth, uint8_t _stencil, uint8_t _c0 = UINT8_MAX, uint8_t _c1 = UINT8_MAX, uint8_t _c2 = UINT8_MAX, uint8_t _c3 = UINT8_MAX, uint8_t _c4 = UINT8_MAX, uint8_t _c5 = UINT8_MAX, uint8_t _c6 = UINT8_MAX, uint8_t _c7 = UINT8_MAX)
 .. doxygenfunction:: bgfx::setViewMode
 .. doxygenfunction:: bgfx::setViewFrameBuffer
+.. doxygenfunction:: bgfx::setViewSubpass
 .. doxygenfunction:: bgfx::setViewTransform
 .. doxygenfunction:: bgfx::setViewOrder
 .. doxygenfunction:: bgfx::setViewShadingRate
@@ -670,11 +672,21 @@ Frame Buffers
 .. doxygenstruct:: bgfx::Attachment
     :members:
 
+.. doxygenstruct:: bgfx::AttachmentReference
+    :members:
+
+.. doxygenstruct:: bgfx::Subpass
+    :members:
+
+.. doxygenstruct:: bgfx::FrameBufferDesc
+    :members:
+
 .. doxygenfunction:: bgfx::isFrameBufferValid
 .. doxygenfunction:: bgfx::createFrameBuffer(uint16_t _width, uint16_t _height, TextureFormat::Enum _format, uint64_t _textureFlags = BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP)
 .. doxygenfunction:: bgfx::createFrameBuffer(BackbufferRatio::Enum _ratio, TextureFormat::Enum _format, uint64_t _textureFlags = BGFX_SAMPLER_U_CLAMP|BGFX_SAMPLER_V_CLAMP)
 .. doxygenfunction:: bgfx::createFrameBuffer(uint8_t _num, const TextureHandle* _handles, bool _destroyTexture)
 .. doxygenfunction:: bgfx::createFrameBuffer(uint8_t _num, const Attachment* _attachment, bool _destroyTexture)
+.. doxygenfunction:: bgfx::createFrameBuffer(const FrameBufferDesc& _desc)
 .. doxygenfunction:: bgfx::setName(FrameBufferHandle _handle, const char* _name, int32_t _len = INT32_MAX)
 .. doxygenfunction:: bgfx::getTexture
 .. doxygenfunction:: bgfx::destroy(FrameBufferHandle _handle)

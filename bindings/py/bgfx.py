@@ -585,16 +585,17 @@ class CapsFlags(enum.IntFlag):
 	PrimitiveId = 0x800
 	RendererMultithreaded = 0x1000
 	ShaderF16 = 0x2000
-	SwapChain = 0x4000
-	TextureCubeArray = 0x8000
-	TextureDirectAccess = 0x10000
-	TextureExternal = 0x20000
-	TextureExternalShared = 0x40000
-	TransparentBackbuffer = 0x80000
-	VariableRateShading = 0x100000
-	VertexAttribUint10 = 0x200000
-	VideoDecode = 0x400000
-	ViewportLayerArray = 0x800000
+	Subpass = 0x4000
+	SwapChain = 0x8000
+	TextureCubeArray = 0x10000
+	TextureDirectAccess = 0x20000
+	TextureExternal = 0x40000
+	TextureExternalShared = 0x80000
+	TransparentBackbuffer = 0x100000
+	VariableRateShading = 0x200000
+	VertexAttribUint10 = 0x400000
+	VideoDecode = 0x800000
+	ViewportLayerArray = 0x1000000
 
 class CapsFormatFlags(enum.IntFlag):
 	TextureNone = 0x0
@@ -731,6 +732,15 @@ class UniformInfo(ctypes.Structure):
 	pass
 
 class Attachment(ctypes.Structure):
+	pass
+
+class AttachmentReference(ctypes.Structure):
+	pass
+
+class Subpass(ctypes.Structure):
+	pass
+
+class FrameBufferDesc(ctypes.Structure):
 	pass
 
 class Transform(ctypes.Structure):
@@ -1049,6 +1059,27 @@ Attachment._fields_ = [
 	("layer", ctypes.c_uint16),
 	("numLayers", ctypes.c_uint16),
 	("flags", ctypes.c_uint8),
+]
+
+AttachmentReference._fields_ = [
+	("attachment", ctypes.c_uint8),
+	("resolve", ctypes.c_uint8),
+]
+
+Subpass._fields_ = [
+	("inputAttachments", ctypes.POINTER(AttachmentReference)),
+	("numInputAttachments", ctypes.c_uint8),
+	("colorAttachments", ctypes.POINTER(AttachmentReference)),
+	("numColorAttachments", ctypes.c_uint8),
+	("depthStencilAttachment", ctypes.c_uint8),
+]
+
+FrameBufferDesc._fields_ = [
+	("attachments", ctypes.POINTER(Attachment)),
+	("numAttachments", ctypes.c_uint8),
+	("subpasses", ctypes.POINTER(Subpass)),
+	("numSubpasses", ctypes.c_uint8),
+	("destroyTextures", ctypes.c_bool),
 ]
 
 Transform._fields_ = [
@@ -1483,6 +1514,10 @@ def _bind(lib):
 	bgfx_create_frame_buffer_from_attachment = lib.bgfx_create_frame_buffer_from_attachment
 	bgfx_create_frame_buffer_from_attachment.argtypes = [ctypes.c_uint8, ctypes.POINTER(Attachment), ctypes.c_bool]
 	bgfx_create_frame_buffer_from_attachment.restype = FrameBufferHandle
+	global bgfx_create_frame_buffer_desc
+	bgfx_create_frame_buffer_desc = lib.bgfx_create_frame_buffer_desc
+	bgfx_create_frame_buffer_desc.argtypes = [ctypes.POINTER(FrameBufferDesc)]
+	bgfx_create_frame_buffer_desc.restype = FrameBufferHandle
 	global bgfx_create_frame_buffer_from_swap_chain
 	bgfx_create_frame_buffer_from_swap_chain = lib.bgfx_create_frame_buffer_from_swap_chain
 	bgfx_create_frame_buffer_from_swap_chain.argtypes = [ctypes.POINTER(SwapChain)]
@@ -1583,6 +1618,10 @@ def _bind(lib):
 	bgfx_set_view_frame_buffer = lib.bgfx_set_view_frame_buffer
 	bgfx_set_view_frame_buffer.argtypes = [ctypes.c_uint16, FrameBufferHandle]
 	bgfx_set_view_frame_buffer.restype = None
+	global bgfx_set_view_subpass
+	bgfx_set_view_subpass = lib.bgfx_set_view_subpass
+	bgfx_set_view_subpass.argtypes = [ctypes.c_uint16, ctypes.c_uint8]
+	bgfx_set_view_subpass.restype = None
 	global bgfx_set_view_transform
 	bgfx_set_view_transform = lib.bgfx_set_view_transform
 	bgfx_set_view_transform.argtypes = [ctypes.c_uint16, ctypes.c_void_p, ctypes.c_void_p]

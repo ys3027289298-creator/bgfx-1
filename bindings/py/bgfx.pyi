@@ -1082,26 +1082,28 @@ class CapsFlags(enum.IntFlag):
 	RendererMultithreaded = 0x1000
 	# 16-bit floats are supported in shaders.
 	ShaderF16 = 0x2000
+	# Multiple subpasses and input attachments are supported.
+	Subpass = 0x4000
 	# Multiple windows are supported.
-	SwapChain = 0x4000
+	SwapChain = 0x8000
 	# Cubemap texture array is supported.
-	TextureCubeArray = 0x8000
+	TextureCubeArray = 0x10000
 	# CPU direct access to GPU texture memory.
-	TextureDirectAccess = 0x10000
+	TextureDirectAccess = 0x20000
 	# External texture is supported.
-	TextureExternal = 0x20000
+	TextureExternal = 0x40000
 	# External shared texture is supported.
-	TextureExternalShared = 0x40000
+	TextureExternalShared = 0x80000
 	# Transparent back buffer supported.
-	TransparentBackbuffer = 0x80000
+	TransparentBackbuffer = 0x100000
 	# Variable Rate Shading
-	VariableRateShading = 0x100000
+	VariableRateShading = 0x200000
 	# Vertex attribute 10_10_10_2 is supported.
-	VertexAttribUint10 = 0x200000
+	VertexAttribUint10 = 0x400000
 	# Hardware video decode is supported.
-	VideoDecode = 0x400000
+	VideoDecode = 0x800000
 	# Viewport layer is available in vertex shader.
-	ViewportLayerArray = 0x800000
+	ViewportLayerArray = 0x1000000
 
 class CapsFormatFlags(enum.IntFlag):
 	# Texture format is not supported.
@@ -1745,6 +1747,60 @@ class Attachment(ctypes.Structure):
 	numLayers: int
 	# Attachment flags. See: `BGFX_ATTACHMENT_*`
 	flags: int
+
+# Subpass attachment reference.
+# 
+# Attachment indices refer to `FrameBufferDesc::attachments`.
+# 
+# @attention `resolve` is only used by color attachment references. It names the
+#   single-sampled attachment receiving the resolved MSAA image for that color attachment.
+# 
+class AttachmentReference(ctypes.Structure):
+	# Attachment index. Use `UINT8_MAX` for an unused slot.
+	attachment: int
+	# Resolve attachment index. Use `UINT8_MAX` when no resolve is needed.
+	resolve: int
+
+# Subpass description.
+# 
+# Input attachments are read in the current subpass with the shader binding
+# convention documented by `SUBPASS_INPUT` in `bgfx_shader.sh`. The input attachment
+# index used by the shader must match the array position in `inputAttachments`.
+# 
+# @attention Only Vulkan currently supports this. See `BGFX_CAPS_SUBPASS`.
+# 
+class Subpass(ctypes.Structure):
+	# Input attachment references.
+	inputAttachments: _Pointer[AttachmentReference]
+	# Number of input attachment references.
+	numInputAttachments: int
+	# Color attachment references.
+	colorAttachments: _Pointer[AttachmentReference]
+	# Number of color attachment references.
+	numColorAttachments: int
+	# Depth/stencil attachment index, or `UINT8_MAX`.
+	depthStencilAttachment: int
+
+# Frame buffer description with optional subpasses.
+# 
+# When `numSubpasses` is zero this is equivalent to
+# `createFrameBuffer(numAttachments, attachments, destroyTextures)` and keeps the
+# single-pass fast path. When subpasses are declared, views select the subpass they render
+# into with `setViewSubpass`.
+# 
+# @attention Only Vulkan currently supports subpasses. See `BGFX_CAPS_SUBPASS`.
+# 
+class FrameBufferDesc(ctypes.Structure):
+	# Render target attachments.
+	attachments: _Pointer[Attachment]
+	# Number of render target attachments.
+	numAttachments: int
+	# Subpass descriptions. Can be `NULL` when `numSubpasses` is zero.
+	subpasses: _Pointer[Subpass]
+	# Number of subpasses.
+	numSubpasses: int
+	# If true, textures will be destroyed when the frame buffer is destroyed.
+	destroyTextures: bool
 
 # Transform data.
 class Transform(ctypes.Structure):
@@ -2527,6 +2583,12 @@ def bgfx_create_frame_buffer_from_handles(_num: int, _handles: Optional[Union[Te
 # mip level.
 def bgfx_create_frame_buffer_from_attachment(_num: int, _attachment: Optional[Union[Attachment, _Pointer[Attachment], ctypes.Array]], _destroyTexture: bool, /) -> FrameBufferHandle: ...
 
+# Create a frame buffer from a description with optional subpasses.
+# 
+# @attention Availability depends on: `BGFX_CAPS_SUBPASS` when subpasses are declared.
+# 
+def bgfx_create_frame_buffer_desc(_desc: Optional[Union[FrameBufferDesc, _Pointer[FrameBufferDesc], ctypes.Array]], /) -> FrameBufferHandle: ...
+
 # Create a frame buffer for a window, from a full swap chain description.
 # 
 # @remarks
@@ -2715,6 +2777,15 @@ def bgfx_set_view_mode(_id: int, _mode: Union[ViewMode, int], /) -> None: ...
 #   Not persistent after `bgfx::reset` call.
 # 
 def bgfx_set_view_frame_buffer(_id: int, _handle: FrameBufferHandle, /) -> None: ...
+
+# Set view subpass.
+# 
+# Views rendering into the same subpass frame buffer must be submitted in increasing
+# subpass order. A view can share a subpass with earlier views.
+# 
+# @attention Availability depends on: `BGFX_CAPS_SUBPASS`.
+# 
+def bgfx_set_view_subpass(_id: int, _subpass: int, /) -> None: ...
 
 # Set view's view matrix and projection matrix,
 # all draw primitives in this view will use these two matrices.

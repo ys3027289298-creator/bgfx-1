@@ -1220,6 +1220,63 @@ typedef struct bgfx_attachment_s
 } bgfx_attachment_t;
 
 /**
+ * Subpass attachment reference.
+ *
+ * Attachment indices refer to `FrameBufferDesc::attachments`.
+ *
+ * @attention `resolve` is only used by color attachment references. It names the
+ *   single-sampled attachment receiving the resolved MSAA image for that color attachment.
+ *
+ */
+typedef struct bgfx_attachment_reference_s
+{
+    uint8_t              attachment;         /** Attachment index. Use `UINT8_MAX` for an unused slot. */
+    uint8_t              resolve;            /** Resolve attachment index. Use `UINT8_MAX` when no resolve is needed. */
+
+} bgfx_attachment_reference_t;
+
+/**
+ * Subpass description.
+ *
+ * Input attachments are read in the current subpass with the shader binding
+ * convention documented by `SUBPASS_INPUT` in `bgfx_shader.sh`. The input attachment
+ * index used by the shader must match the array position in `inputAttachments`.
+ *
+ * @attention Only Vulkan currently supports this. See `BGFX_CAPS_SUBPASS`.
+ *
+ */
+typedef struct bgfx_subpass_s
+{
+    const bgfx_attachment_reference_t* inputAttachments; /** Input attachment references.             */
+    uint8_t              numInputAttachments; /** Number of input attachment references.   */
+    const bgfx_attachment_reference_t* colorAttachments; /** Color attachment references.             */
+    uint8_t              numColorAttachments; /** Number of color attachment references.   */
+    uint8_t              depthStencilAttachment; /** Depth/stencil attachment index, or `UINT8_MAX`. */
+
+} bgfx_subpass_t;
+
+/**
+ * Frame buffer description with optional subpasses.
+ *
+ * When `numSubpasses` is zero this is equivalent to
+ * `createFrameBuffer(numAttachments, attachments, destroyTextures)` and keeps the
+ * single-pass fast path. When subpasses are declared, views select the subpass they render
+ * into with `setViewSubpass`.
+ *
+ * @attention Only Vulkan currently supports subpasses. See `BGFX_CAPS_SUBPASS`.
+ *
+ */
+typedef struct bgfx_frame_buffer_desc_s
+{
+    const bgfx_attachment_t* attachments;    /** Render target attachments.               */
+    uint8_t              numAttachments;     /** Number of render target attachments.     */
+    const bgfx_subpass_t* subpasses;         /** Subpass descriptions. Can be `NULL` when `numSubpasses` is zero. */
+    uint8_t              numSubpasses;       /** Number of subpasses.                     */
+    bool                 destroyTextures;    /** If true, textures will be destroyed when the frame buffer is destroyed. */
+
+} bgfx_frame_buffer_desc_t;
+
+/**
  * Transform data.
  *
  */
@@ -2663,6 +2720,18 @@ BGFX_C_API bgfx_frame_buffer_handle_t bgfx_create_frame_buffer_from_handles(uint
 BGFX_C_API bgfx_frame_buffer_handle_t bgfx_create_frame_buffer_from_attachment(uint8_t _num, const bgfx_attachment_t* _attachment, bool _destroyTexture);
 
 /**
+ * Create a frame buffer from a description with optional subpasses.
+ *
+ * @attention Availability depends on: `BGFX_CAPS_SUBPASS` when subpasses are declared.
+ *
+ * @param[in] _desc Frame buffer description. See: `bgfx::FrameBufferDesc`.
+ *
+ * @returns Frame buffer handle.
+ *
+ */
+BGFX_C_API bgfx_frame_buffer_handle_t bgfx_create_frame_buffer_desc(const bgfx_frame_buffer_desc_t* _desc);
+
+/**
  * Create a frame buffer for a window, from a full swap chain description.
  *
  * @remarks
@@ -3017,6 +3086,20 @@ BGFX_C_API void bgfx_set_view_mode(bgfx_view_id_t _id, bgfx_view_mode_t _mode);
  *
  */
 BGFX_C_API void bgfx_set_view_frame_buffer(bgfx_view_id_t _id, bgfx_frame_buffer_handle_t _handle);
+
+/**
+ * Set view subpass.
+ *
+ * Views rendering into the same subpass frame buffer must be submitted in increasing
+ * subpass order. A view can share a subpass with earlier views.
+ *
+ * @attention Availability depends on: `BGFX_CAPS_SUBPASS`.
+ *
+ * @param[in] _id View id.
+ * @param[in] _subpass Subpass index declared by `bgfx::FrameBufferDesc`.
+ *
+ */
+BGFX_C_API void bgfx_set_view_subpass(bgfx_view_id_t _id, uint8_t _subpass);
 
 /**
  * Set view's view matrix and projection matrix,
@@ -4636,6 +4719,7 @@ typedef enum bgfx_function_id
     BGFX_FUNCTION_ID_CREATE_FRAME_BUFFER_SCALED,
     BGFX_FUNCTION_ID_CREATE_FRAME_BUFFER_FROM_HANDLES,
     BGFX_FUNCTION_ID_CREATE_FRAME_BUFFER_FROM_ATTACHMENT,
+    BGFX_FUNCTION_ID_CREATE_FRAME_BUFFER_DESC,
     BGFX_FUNCTION_ID_CREATE_FRAME_BUFFER_FROM_SWAP_CHAIN,
     BGFX_FUNCTION_ID_UPDATE_SWAP_CHAIN,
     BGFX_FUNCTION_ID_SET_FRAME_BUFFER_NAME,
@@ -4661,6 +4745,7 @@ typedef enum bgfx_function_id
     BGFX_FUNCTION_ID_SET_VIEW_CLEAR_MRT,
     BGFX_FUNCTION_ID_SET_VIEW_MODE,
     BGFX_FUNCTION_ID_SET_VIEW_FRAME_BUFFER,
+    BGFX_FUNCTION_ID_SET_VIEW_SUBPASS,
     BGFX_FUNCTION_ID_SET_VIEW_TRANSFORM,
     BGFX_FUNCTION_ID_SET_VIEW_ORDER,
     BGFX_FUNCTION_ID_SET_VIEW_SHADING_RATE,
@@ -4869,6 +4954,7 @@ struct bgfx_interface_vtbl
     bgfx_frame_buffer_handle_t (*create_frame_buffer_scaled)(bgfx_backbuffer_ratio_t _ratio, bgfx_texture_format_t _format, uint64_t _textureFlags);
     bgfx_frame_buffer_handle_t (*create_frame_buffer_from_handles)(uint8_t _num, const bgfx_texture_handle_t* _handles, bool _destroyTexture);
     bgfx_frame_buffer_handle_t (*create_frame_buffer_from_attachment)(uint8_t _num, const bgfx_attachment_t* _attachment, bool _destroyTexture);
+    bgfx_frame_buffer_handle_t (*create_frame_buffer_desc)(const bgfx_frame_buffer_desc_t* _desc);
     bgfx_frame_buffer_handle_t (*create_frame_buffer_from_swap_chain)(const bgfx_swap_chain_t* _desc);
     void (*update_swap_chain)(bgfx_frame_buffer_handle_t _handle, const bgfx_swap_chain_t* _desc);
     void (*set_frame_buffer_name)(bgfx_frame_buffer_handle_t _handle, const char* _name, int32_t _len);
@@ -4894,6 +4980,7 @@ struct bgfx_interface_vtbl
     void (*set_view_clear_mrt)(bgfx_view_id_t _id, uint16_t _flags, float _depth, uint8_t _stencil, uint8_t _c0, uint8_t _c1, uint8_t _c2, uint8_t _c3, uint8_t _c4, uint8_t _c5, uint8_t _c6, uint8_t _c7);
     void (*set_view_mode)(bgfx_view_id_t _id, bgfx_view_mode_t _mode);
     void (*set_view_frame_buffer)(bgfx_view_id_t _id, bgfx_frame_buffer_handle_t _handle);
+    void (*set_view_subpass)(bgfx_view_id_t _id, uint8_t _subpass);
     void (*set_view_transform)(bgfx_view_id_t _id, const void* _view, const void* _proj);
     void (*set_view_order)(bgfx_view_id_t _id, uint16_t _num, const bgfx_view_id_t* _order);
     void (*set_view_shading_rate)(bgfx_view_id_t _id, bgfx_shading_rate_t _shadingRate);

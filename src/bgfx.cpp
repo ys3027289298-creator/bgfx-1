@@ -4406,6 +4406,22 @@ namespace bgfx
 					{
 						m_renderCtx->createFrameBuffer(handle, readSwapChain(_cmdbuf) );
 					}
+					else if (2 == type)
+					{
+						uint8_t num;
+						_cmdbuf.read(num);
+
+						Attachment attachment[BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
+						_cmdbuf.read(attachment, sizeof(Attachment) * num);
+
+						uint8_t numSubpasses;
+						_cmdbuf.read(numSubpasses);
+
+						SubpassDesc subpasses[BGFX_CONFIG_MAX_SUBPASSES];
+						_cmdbuf.read(subpasses, sizeof(SubpassDesc) * numSubpasses);
+
+						m_renderCtx->createFrameBuffer(handle, num, attachment, numSubpasses, subpasses);
+					}
 					else
 					{
 						uint8_t num;
@@ -7120,6 +7136,11 @@ namespace bgfx
 		return s_ctx->createFrameBuffer(_num, _attachment, _destroyTextures);
 	}
 
+	FrameBufferHandle createFrameBuffer(const FrameBufferDesc& _desc)
+	{
+		return s_ctx->createFrameBuffer(_desc);
+	}
+
 	FrameBufferHandle createFrameBuffer(const SwapChain& _desc)
 	{
 		BGFX_CHECK_CAPS(BGFX_CAPS_SWAP_CHAIN, "Swap chain is not supported!");
@@ -7327,6 +7348,12 @@ namespace bgfx
 	{
 		BX_ASSERT(checkView(_id), "Invalid view id: %d", _id);
 		s_ctx->setViewFrameBuffer(_id, _handle);
+	}
+
+	void setViewSubpass(ViewId _id, uint8_t _subpass)
+	{
+		BX_ASSERT(checkView(_id), "Invalid view id: %d", _id);
+		s_ctx->setViewSubpass(_id, _subpass);
 	}
 
 	void setViewTransform(ViewId _id, const void* _view, const void* _proj)

@@ -15,6 +15,11 @@ namespace bgfx
 	static constexpr uint8_t kSpirvBindShift       = 2;
 	static constexpr uint8_t kSpirvSamplerShift    = 16;
 
+	// Shader binary marker for a Vulkan subpass input attachment. The marker is stored
+	// in the texture component field, while the texture format field stores the
+	// input attachment index declared by the shader.
+	static constexpr uint8_t kTextureComponentSubpass = 0xFF;
+
 	static constexpr uint8_t kSpirvOldVertexBinding    = 0;
 	static constexpr uint8_t kSpirvOldFragmentBinding  = 48;
 	static constexpr uint8_t kSpirvOldFragmentShift    = 48;

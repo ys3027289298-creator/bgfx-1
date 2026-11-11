@@ -713,35 +713,38 @@ pub const CapsFlags_RendererMultithreaded: CapsFlags  = 0x0000000000001000;
 /// 16-bit floats are supported in shaders.
 pub const CapsFlags_ShaderF16: CapsFlags              = 0x0000000000002000;
 
+/// Multiple subpasses and input attachments are supported.
+pub const CapsFlags_Subpass: CapsFlags                = 0x0000000000004000;
+
 /// Multiple windows are supported.
-pub const CapsFlags_SwapChain: CapsFlags              = 0x0000000000004000;
+pub const CapsFlags_SwapChain: CapsFlags              = 0x0000000000008000;
 
 /// Cubemap texture array is supported.
-pub const CapsFlags_TextureCubeArray: CapsFlags       = 0x0000000000008000;
+pub const CapsFlags_TextureCubeArray: CapsFlags       = 0x0000000000010000;
 
 /// CPU direct access to GPU texture memory.
-pub const CapsFlags_TextureDirectAccess: CapsFlags    = 0x0000000000010000;
+pub const CapsFlags_TextureDirectAccess: CapsFlags    = 0x0000000000020000;
 
 /// External texture is supported.
-pub const CapsFlags_TextureExternal: CapsFlags        = 0x0000000000020000;
+pub const CapsFlags_TextureExternal: CapsFlags        = 0x0000000000040000;
 
 /// External shared texture is supported.
-pub const CapsFlags_TextureExternalShared: CapsFlags  = 0x0000000000040000;
+pub const CapsFlags_TextureExternalShared: CapsFlags  = 0x0000000000080000;
 
 /// Transparent back buffer supported.
-pub const CapsFlags_TransparentBackbuffer: CapsFlags  = 0x0000000000080000;
+pub const CapsFlags_TransparentBackbuffer: CapsFlags  = 0x0000000000100000;
 
 /// Variable Rate Shading
-pub const CapsFlags_VariableRateShading: CapsFlags    = 0x0000000000100000;
+pub const CapsFlags_VariableRateShading: CapsFlags    = 0x0000000000200000;
 
 /// Vertex attribute 10_10_10_2 is supported.
-pub const CapsFlags_VertexAttribUint10: CapsFlags     = 0x0000000000200000;
+pub const CapsFlags_VertexAttribUint10: CapsFlags     = 0x0000000000400000;
 
 /// Hardware video decode is supported.
-pub const CapsFlags_VideoDecode: CapsFlags            = 0x0000000000400000;
+pub const CapsFlags_VideoDecode: CapsFlags            = 0x0000000000800000;
 
 /// Viewport layer is available in vertex shader.
-pub const CapsFlags_ViewportLayerArray: CapsFlags     = 0x0000000000800000;
+pub const CapsFlags_ViewportLayerArray: CapsFlags     = 0x0000000001000000;
 
 pub const CapsFormatFlags = u32;
 /// Texture format is not supported.
@@ -1885,6 +1888,27 @@ pub const Init = extern struct {
         pub inline fn init(self: *Attachment, _handle: TextureHandle, _access: Access, _layer: u16, _numLayers: u16, _mip: u16, _flags: u8) void {
             return bgfx_attachment_init(self, _handle, _access, _layer, _numLayers, _mip, _flags);
         }
+    };
+
+    pub const AttachmentReference = extern struct {
+        attachment: u8,
+        resolve: u8,
+    };
+
+    pub const Subpass = extern struct {
+        inputAttachments: [*c]const AttachmentReference,
+        numInputAttachments: u8,
+        colorAttachments: [*c]const AttachmentReference,
+        numColorAttachments: u8,
+        depthStencilAttachment: u8,
+    };
+
+    pub const FrameBufferDesc = extern struct {
+        attachments: [*c]const Attachment,
+        numAttachments: u8,
+        subpasses: [*c]const Subpass,
+        numSubpasses: u8,
+        destroyTextures: bool,
     };
 
     pub const Transform = extern struct {
@@ -3418,6 +3442,16 @@ pub inline fn createFrameBufferFromAttachment(_num: u8, _attachment: [*c]const A
 }
 extern fn bgfx_create_frame_buffer_from_attachment(_num: u8, _attachment: [*c]const Attachment, _destroyTexture: bool) FrameBufferHandle;
 
+/// Create a frame buffer from a description with optional subpasses.
+/// 
+/// @attention Availability depends on: `BGFX_CAPS_SUBPASS` when subpasses are declared.
+/// 
+/// <param name="_desc">Frame buffer description. See: `bgfx::FrameBufferDesc`.</param>
+pub inline fn createFrameBufferDesc(_desc: [*c]const FrameBufferDesc) FrameBufferHandle {
+    return bgfx_create_frame_buffer_desc(_desc);
+}
+extern fn bgfx_create_frame_buffer_desc(_desc: [*c]const FrameBufferDesc) FrameBufferHandle;
+
 /// Create a frame buffer for a window, from a full swap chain description.
 /// 
 /// @remarks
@@ -3734,6 +3768,20 @@ pub inline fn setViewFrameBuffer(_id: ViewId, _handle: FrameBufferHandle) void {
     return bgfx_set_view_frame_buffer(_id, _handle);
 }
 extern fn bgfx_set_view_frame_buffer(_id: ViewId, _handle: FrameBufferHandle) void;
+
+/// Set view subpass.
+/// 
+/// Views rendering into the same subpass frame buffer must be submitted in increasing
+/// subpass order. A view can share a subpass with earlier views.
+/// 
+/// @attention Availability depends on: `BGFX_CAPS_SUBPASS`.
+/// 
+/// <param name="_id">View id.</param>
+/// <param name="_subpass">Subpass index declared by `bgfx::FrameBufferDesc`.</param>
+pub inline fn setViewSubpass(_id: ViewId, _subpass: u8) void {
+    return bgfx_set_view_subpass(_id, _subpass);
+}
+extern fn bgfx_set_view_subpass(_id: ViewId, _subpass: u8) void;
 
 /// Set view's view matrix and projection matrix,
 /// all draw primitives in this view will use these two matrices.

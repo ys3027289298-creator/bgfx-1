@@ -219,6 +219,8 @@ public final class Bgfx {
 		"bgfx_create_frame_buffer_from_handles", FunctionDescriptor.of(FrameBufferHandle.LAYOUT, ValueLayout.JAVA_BYTE, ValueLayout.ADDRESS, ValueLayout.JAVA_BOOLEAN));
 	static final MethodHandle MH_CREATE_FRAME_BUFFER_FROM_ATTACHMENT = downcall(
 		"bgfx_create_frame_buffer_from_attachment", FunctionDescriptor.of(FrameBufferHandle.LAYOUT, ValueLayout.JAVA_BYTE, ValueLayout.ADDRESS, ValueLayout.JAVA_BOOLEAN));
+	static final MethodHandle MH_CREATE_FRAME_BUFFER_DESC = downcall(
+		"bgfx_create_frame_buffer_desc", FunctionDescriptor.of(FrameBufferHandle.LAYOUT, ValueLayout.ADDRESS));
 	static final MethodHandle MH_CREATE_FRAME_BUFFER_FROM_SWAP_CHAIN = downcall(
 		"bgfx_create_frame_buffer_from_swap_chain", FunctionDescriptor.of(FrameBufferHandle.LAYOUT, ValueLayout.ADDRESS));
 	static final MethodHandle MH_UPDATE_SWAP_CHAIN = downcall(
@@ -269,6 +271,8 @@ public final class Bgfx {
 		"bgfx_set_view_mode", FunctionDescriptor.ofVoid(ValueLayout.JAVA_SHORT, ValueLayout.JAVA_INT));
 	static final MethodHandle MH_SET_VIEW_FRAME_BUFFER = downcall(
 		"bgfx_set_view_frame_buffer", FunctionDescriptor.ofVoid(ValueLayout.JAVA_SHORT, FrameBufferHandle.LAYOUT));
+	static final MethodHandle MH_SET_VIEW_SUBPASS = downcall(
+		"bgfx_set_view_subpass", FunctionDescriptor.ofVoid(ValueLayout.JAVA_SHORT, ValueLayout.JAVA_BYTE));
 	static final MethodHandle MH_SET_VIEW_TRANSFORM = downcall(
 		"bgfx_set_view_transform", FunctionDescriptor.ofVoid(ValueLayout.JAVA_SHORT, ValueLayout.ADDRESS, ValueLayout.ADDRESS));
 	static final MethodHandle MH_SET_VIEW_ORDER = downcall(
@@ -1826,6 +1830,23 @@ public final class Bgfx {
 	}
 
 	/**
+	 * Create a frame buffer from a description with optional subpasses.
+	 * <p>
+	 * <strong>Attention:</strong> Availability depends on: {@code BGFX_CAPS_SUBPASS} when subpasses are declared.
+	 * @param _desc Frame buffer description. See: {@code FrameBufferDesc}.
+	 * @return Frame buffer handle.
+	 */
+	public static FrameBufferHandle createFrameBufferDesc(FrameBufferDesc _desc) {
+		try {
+			try (Arena arena = Arena.ofConfined()) {
+				return FrameBufferHandle.read((MemorySegment) MH_CREATE_FRAME_BUFFER_DESC.invokeExact((SegmentAllocator) arena, address(_desc)));
+			}
+		} catch (Throwable ex) {
+			throw invocationFailure(ex);
+		}
+	}
+
+	/**
 	 * Create a frame buffer for a window, from a full swap chain description.
 	 * <p>
 	 * <strong>Remarks:</strong>
@@ -2290,6 +2311,24 @@ public final class Bgfx {
 			try (Arena arena = Arena.ofConfined()) {
 				MH_SET_VIEW_FRAME_BUFFER.invokeExact(_id, _handle.allocate(arena));
 			}
+		} catch (Throwable ex) {
+			throw invocationFailure(ex);
+		}
+	}
+
+	/**
+	 * Set view subpass.
+	 * <p>
+	 * Views rendering into the same subpass frame buffer must be submitted in increasing
+	 * subpass order. A view can share a subpass with earlier views.
+	 * <p>
+	 * <strong>Attention:</strong> Availability depends on: {@code BGFX_CAPS_SUBPASS}.
+	 * @param _id View id.
+	 * @param _subpass Subpass index declared by {@code FrameBufferDesc}.
+	 */
+	public static void setViewSubpass(short _id, @Unsigned byte _subpass) {
+		try {
+			MH_SET_VIEW_SUBPASS.invokeExact(_id, _subpass);
 		} catch (Throwable ex) {
 			throw invocationFailure(ex);
 		}
@@ -4953,54 +4992,59 @@ public final class Bgfx {
 		public static final long ShaderF16 = 0x0000000000002000L;
 
 		/**
+		 * Multiple subpasses and input attachments are supported.
+		 */
+		public static final long Subpass = 0x0000000000004000L;
+
+		/**
 		 * Multiple windows are supported.
 		 */
-		public static final long SwapChain = 0x0000000000004000L;
+		public static final long SwapChain = 0x0000000000008000L;
 
 		/**
 		 * Cubemap texture array is supported.
 		 */
-		public static final long TextureCubeArray = 0x0000000000008000L;
+		public static final long TextureCubeArray = 0x0000000000010000L;
 
 		/**
 		 * CPU direct access to GPU texture memory.
 		 */
-		public static final long TextureDirectAccess = 0x0000000000010000L;
+		public static final long TextureDirectAccess = 0x0000000000020000L;
 
 		/**
 		 * External texture is supported.
 		 */
-		public static final long TextureExternal = 0x0000000000020000L;
+		public static final long TextureExternal = 0x0000000000040000L;
 
 		/**
 		 * External shared texture is supported.
 		 */
-		public static final long TextureExternalShared = 0x0000000000040000L;
+		public static final long TextureExternalShared = 0x0000000000080000L;
 
 		/**
 		 * Transparent back buffer supported.
 		 */
-		public static final long TransparentBackbuffer = 0x0000000000080000L;
+		public static final long TransparentBackbuffer = 0x0000000000100000L;
 
 		/**
 		 * Variable Rate Shading
 		 */
-		public static final long VariableRateShading = 0x0000000000100000L;
+		public static final long VariableRateShading = 0x0000000000200000L;
 
 		/**
 		 * Vertex attribute 10_10_10_2 is supported.
 		 */
-		public static final long VertexAttribUint10 = 0x0000000000200000L;
+		public static final long VertexAttribUint10 = 0x0000000000400000L;
 
 		/**
 		 * Hardware video decode is supported.
 		 */
-		public static final long VideoDecode = 0x0000000000400000L;
+		public static final long VideoDecode = 0x0000000000800000L;
 
 		/**
 		 * Viewport layer is available in vertex shader.
 		 */
-		public static final long ViewportLayerArray = 0x0000000000800000L;
+		public static final long ViewportLayerArray = 0x0000000001000000L;
 	}
 
 	/**
@@ -10705,6 +10749,398 @@ public final class Bgfx {
 			} catch (Throwable ex) {
 				throw invocationFailure(ex);
 			}
+		}
+	}
+
+	/**
+	 * Subpass attachment reference.
+	 * <p>
+	 * Attachment indices refer to {@code FrameBufferDesc.attachments}.
+	 * <p>
+	 * <strong>Attention:</strong> {@code resolve} is only used by color attachment references. It names the
+	 *   single-sampled attachment receiving the resolved MSAA image for that color attachment.
+	 */
+	@NullMarked
+	public static final class AttachmentReference extends NativeObject {
+		/**
+		 * Native C structure layout.
+		 */
+		public static final StructLayout LAYOUT = cStruct("bgfx_attachment_reference_t",
+			ValueLayout.JAVA_BYTE.withName("attachment"),
+			ValueLayout.JAVA_BYTE.withName("resolve"));
+		private static final VarHandle VH_ATTACHMENT = LAYOUT.varHandle(
+			MemoryLayout.PathElement.groupElement("attachment"));
+		private static final VarHandle VH_RESOLVE = LAYOUT.varHandle(
+			MemoryLayout.PathElement.groupElement("resolve"));
+		/**
+		 * Wraps an existing native structure.
+		 * @param segment native memory segment
+		 */
+		public AttachmentReference(MemorySegment segment) {
+			super(segment, LAYOUT);
+		}
+
+		/**
+		 * Allocates a native structure.
+		 * @param allocator destination allocator
+		 */
+		public AttachmentReference(SegmentAllocator allocator) {
+			super(allocator, LAYOUT);
+		}
+
+		/**
+		 * Attachment index. Use {@code UINT8_MAX} for an unused slot.
+		 * @return the field value
+		 */
+		public @Unsigned byte attachment() {
+			return (@Unsigned byte) VH_ATTACHMENT.get(segment(), 0L);
+		}
+
+		/**
+		 * Sets the native {@code attachment} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public AttachmentReference attachment(@Unsigned byte value) {
+			VH_ATTACHMENT.set(segment(), 0L, value);
+			return this;
+		}
+
+		/**
+		 * Sets the native {@code attachment} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public AttachmentReference attachment(int value) {
+			return attachment(NativeObject.toUnsignedByte(value));
+		}
+
+		/**
+		 * Resolve attachment index. Use {@code UINT8_MAX} when no resolve is needed.
+		 * @return the field value
+		 */
+		public @Unsigned byte resolve() {
+			return (@Unsigned byte) VH_RESOLVE.get(segment(), 0L);
+		}
+
+		/**
+		 * Sets the native {@code resolve} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public AttachmentReference resolve(@Unsigned byte value) {
+			VH_RESOLVE.set(segment(), 0L, value);
+			return this;
+		}
+
+		/**
+		 * Sets the native {@code resolve} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public AttachmentReference resolve(int value) {
+			return resolve(NativeObject.toUnsignedByte(value));
+		}
+	}
+
+	/**
+	 * Subpass description.
+	 * <p>
+	 * Input attachments are read in the current subpass with the shader binding
+	 * convention documented by {@code SUBPASS_INPUT} in {@code bgfx_shader.sh}. The input attachment
+	 * index used by the shader must match the array position in {@code inputAttachments}.
+	 * <p>
+	 * <strong>Attention:</strong> Only Vulkan currently supports this. See {@code BGFX_CAPS_SUBPASS}.
+	 */
+	@NullMarked
+	public static final class Subpass extends NativeObject {
+		/**
+		 * Native C structure layout.
+		 */
+		public static final StructLayout LAYOUT = cStruct("bgfx_subpass_t",
+			ValueLayout.ADDRESS.withName("inputAttachments"),
+			ValueLayout.JAVA_BYTE.withName("numInputAttachments"),
+			ValueLayout.ADDRESS.withName("colorAttachments"),
+			ValueLayout.JAVA_BYTE.withName("numColorAttachments"),
+			ValueLayout.JAVA_BYTE.withName("depthStencilAttachment"));
+		private static final VarHandle VH_INPUTATTACHMENTS = LAYOUT.varHandle(
+			MemoryLayout.PathElement.groupElement("inputAttachments"));
+		private static final VarHandle VH_NUMINPUTATTACHMENTS = LAYOUT.varHandle(
+			MemoryLayout.PathElement.groupElement("numInputAttachments"));
+		private static final VarHandle VH_COLORATTACHMENTS = LAYOUT.varHandle(
+			MemoryLayout.PathElement.groupElement("colorAttachments"));
+		private static final VarHandle VH_NUMCOLORATTACHMENTS = LAYOUT.varHandle(
+			MemoryLayout.PathElement.groupElement("numColorAttachments"));
+		private static final VarHandle VH_DEPTHSTENCILATTACHMENT = LAYOUT.varHandle(
+			MemoryLayout.PathElement.groupElement("depthStencilAttachment"));
+		/**
+		 * Wraps an existing native structure.
+		 * @param segment native memory segment
+		 */
+		public Subpass(MemorySegment segment) {
+			super(segment, LAYOUT);
+		}
+
+		/**
+		 * Allocates a native structure.
+		 * @param allocator destination allocator
+		 */
+		public Subpass(SegmentAllocator allocator) {
+			super(allocator, LAYOUT);
+		}
+
+		/**
+		 * Input attachment references.
+		 * @return the field value
+		 */
+		public AttachmentReference inputAttachments() {
+			return new AttachmentReference((MemorySegment) VH_INPUTATTACHMENTS.get(segment(), 0L));
+		}
+
+		/**
+		 * Sets the native {@code inputAttachments} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public Subpass inputAttachments(AttachmentReference value) {
+			VH_INPUTATTACHMENTS.set(segment(), 0L, address(value));
+			return this;
+		}
+
+		/**
+		 * Number of input attachment references.
+		 * @return the field value
+		 */
+		public @Unsigned byte numInputAttachments() {
+			return (@Unsigned byte) VH_NUMINPUTATTACHMENTS.get(segment(), 0L);
+		}
+
+		/**
+		 * Sets the native {@code numInputAttachments} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public Subpass numInputAttachments(@Unsigned byte value) {
+			VH_NUMINPUTATTACHMENTS.set(segment(), 0L, value);
+			return this;
+		}
+
+		/**
+		 * Sets the native {@code numInputAttachments} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public Subpass numInputAttachments(int value) {
+			return numInputAttachments(NativeObject.toUnsignedByte(value));
+		}
+
+		/**
+		 * Color attachment references.
+		 * @return the field value
+		 */
+		public AttachmentReference colorAttachments() {
+			return new AttachmentReference((MemorySegment) VH_COLORATTACHMENTS.get(segment(), 0L));
+		}
+
+		/**
+		 * Sets the native {@code colorAttachments} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public Subpass colorAttachments(AttachmentReference value) {
+			VH_COLORATTACHMENTS.set(segment(), 0L, address(value));
+			return this;
+		}
+
+		/**
+		 * Number of color attachment references.
+		 * @return the field value
+		 */
+		public @Unsigned byte numColorAttachments() {
+			return (@Unsigned byte) VH_NUMCOLORATTACHMENTS.get(segment(), 0L);
+		}
+
+		/**
+		 * Sets the native {@code numColorAttachments} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public Subpass numColorAttachments(@Unsigned byte value) {
+			VH_NUMCOLORATTACHMENTS.set(segment(), 0L, value);
+			return this;
+		}
+
+		/**
+		 * Sets the native {@code numColorAttachments} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public Subpass numColorAttachments(int value) {
+			return numColorAttachments(NativeObject.toUnsignedByte(value));
+		}
+
+		/**
+		 * Depth/stencil attachment index, or {@code UINT8_MAX}.
+		 * @return the field value
+		 */
+		public @Unsigned byte depthStencilAttachment() {
+			return (@Unsigned byte) VH_DEPTHSTENCILATTACHMENT.get(segment(), 0L);
+		}
+
+		/**
+		 * Sets the native {@code depthStencilAttachment} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public Subpass depthStencilAttachment(@Unsigned byte value) {
+			VH_DEPTHSTENCILATTACHMENT.set(segment(), 0L, value);
+			return this;
+		}
+
+		/**
+		 * Sets the native {@code depthStencilAttachment} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public Subpass depthStencilAttachment(int value) {
+			return depthStencilAttachment(NativeObject.toUnsignedByte(value));
+		}
+	}
+
+	/**
+	 * Frame buffer description with optional subpasses.
+	 * <p>
+	 * When {@code numSubpasses} is zero this is equivalent to
+	 * {@code createFrameBuffer(numAttachments, attachments, destroyTextures)} and keeps the
+	 * single-pass fast path. When subpasses are declared, views select the subpass they render
+	 * into with {@code setViewSubpass}.
+	 * <p>
+	 * <strong>Attention:</strong> Only Vulkan currently supports subpasses. See {@code BGFX_CAPS_SUBPASS}.
+	 */
+	@NullMarked
+	public static final class FrameBufferDesc extends NativeObject {
+		/**
+		 * Native C structure layout.
+		 */
+		public static final StructLayout LAYOUT = cStruct("bgfx_frame_buffer_desc_t",
+			ValueLayout.ADDRESS.withName("attachments"),
+			ValueLayout.JAVA_BYTE.withName("numAttachments"),
+			ValueLayout.ADDRESS.withName("subpasses"),
+			ValueLayout.JAVA_BYTE.withName("numSubpasses"),
+			ValueLayout.JAVA_BOOLEAN.withName("destroyTextures"));
+		private static final VarHandle VH_ATTACHMENTS = LAYOUT.varHandle(
+			MemoryLayout.PathElement.groupElement("attachments"));
+		private static final VarHandle VH_NUMATTACHMENTS = LAYOUT.varHandle(
+			MemoryLayout.PathElement.groupElement("numAttachments"));
+		private static final VarHandle VH_SUBPASSES = LAYOUT.varHandle(
+			MemoryLayout.PathElement.groupElement("subpasses"));
+		private static final VarHandle VH_NUMSUBPASSES = LAYOUT.varHandle(
+			MemoryLayout.PathElement.groupElement("numSubpasses"));
+		private static final VarHandle VH_DESTROYTEXTURES = LAYOUT.varHandle(
+			MemoryLayout.PathElement.groupElement("destroyTextures"));
+		/**
+		 * Wraps an existing native structure.
+		 * @param segment native memory segment
+		 */
+		public FrameBufferDesc(MemorySegment segment) {
+			super(segment, LAYOUT);
+		}
+
+		/**
+		 * Allocates a native structure.
+		 * @param allocator destination allocator
+		 */
+		public FrameBufferDesc(SegmentAllocator allocator) {
+			super(allocator, LAYOUT);
+		}
+
+		/**
+		 * Render target attachments.
+		 * @return the field value
+		 */
+		public Attachment attachments() {
+			return new Attachment((MemorySegment) VH_ATTACHMENTS.get(segment(), 0L));
+		}
+
+		/**
+		 * Sets the native {@code attachments} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public FrameBufferDesc attachments(Attachment value) {
+			VH_ATTACHMENTS.set(segment(), 0L, address(value));
+			return this;
+		}
+
+		/**
+		 * Number of render target attachments.
+		 * @return the field value
+		 */
+		public @Unsigned byte numAttachments() {
+			return (@Unsigned byte) VH_NUMATTACHMENTS.get(segment(), 0L);
+		}
+
+		/**
+		 * Sets the native {@code numAttachments} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public FrameBufferDesc numAttachments(@Unsigned byte value) {
+			VH_NUMATTACHMENTS.set(segment(), 0L, value);
+			return this;
+		}
+
+		/**
+		 * Sets the native {@code numAttachments} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public FrameBufferDesc numAttachments(int value) {
+			return numAttachments(NativeObject.toUnsignedByte(value));
+		}
+
+		/**
+		 * Subpass descriptions. Can be {@code NULL} when {@code numSubpasses} is zero.
+		 * @return the field value
+		 */
+		public Subpass subpasses() {
+			return new Subpass((MemorySegment) VH_SUBPASSES.get(segment(), 0L));
+		}
+
+		/**
+		 * Sets the native {@code subpasses} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public FrameBufferDesc subpasses(Subpass value) {
+			VH_SUBPASSES.set(segment(), 0L, address(value));
+			return this;
+		}
+
+		/**
+		 * Number of subpasses.
+		 * @return the field value
+		 */
+		public @Unsigned byte numSubpasses() {
+			return (@Unsigned byte) VH_NUMSUBPASSES.get(segment(), 0L);
+		}
+
+		/**
+		 * Sets the native {@code numSubpasses} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public FrameBufferDesc numSubpasses(@Unsigned byte value) {
+			VH_NUMSUBPASSES.set(segment(), 0L, value);
+			return this;
+		}
+
+		/**
+		 * Sets the native {@code numSubpasses} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public FrameBufferDesc numSubpasses(int value) {
+			return numSubpasses(NativeObject.toUnsignedByte(value));
+		}
+
+		/**
+		 * If true, textures will be destroyed when the frame buffer is destroyed.
+		 * @return the field value
+		 */
+		public boolean destroyTextures() {
+			return (boolean) VH_DESTROYTEXTURES.get(segment(), 0L);
+		}
+
+		/**
+		 * Sets the native {@code destroyTextures} field and returns {@code this}.
+		 * @param value the new field value
+		 */
+		public FrameBufferDesc destroyTextures(boolean value) {
+			VH_DESTROYTEXTURES.set(segment(), 0L, value);
+			return this;
 		}
 	}
 

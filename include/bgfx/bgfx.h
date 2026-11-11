@@ -1098,6 +1098,60 @@ namespace bgfx
 		uint8_t flags;        //!< Attachment flags. See: `BGFX_ATTACHMENT_*`
 	};
 
+	/// Subpass attachment reference.
+	///
+	/// Attachment indices refer to `FrameBufferDesc::attachments`.
+	///
+	/// @attention `resolve` is only used by color attachment references. It names the
+	///   single-sampled attachment receiving the resolved MSAA image for that color attachment.
+	///
+	/// @attention C99's equivalent binding is `bgfx_attachment_reference_t`.
+	///
+	struct AttachmentReference
+	{
+		uint8_t attachment; //!< Attachment index. Use `UINT8_MAX` for an unused slot.
+		uint8_t resolve;    //!< Resolve attachment index. Use `UINT8_MAX` when no resolve is needed.
+	};
+
+	/// Subpass description.
+	///
+	/// Input attachments are read in the current subpass with the shader binding
+	/// convention documented by `SUBPASS_INPUT` in `bgfx_shader.sh`. The input attachment
+	/// index used by the shader must match the array position in `inputAttachments`.
+	///
+	/// @attention Only Vulkan currently supports this. See `BGFX_CAPS_SUBPASS`.
+	///
+	/// @attention C99's equivalent binding is `bgfx_subpass_t`.
+	///
+	struct Subpass
+	{
+		const AttachmentReference* inputAttachments; //!< Input attachment references.
+		uint8_t numInputAttachments;                 //!< Number of input attachment references.
+		const AttachmentReference* colorAttachments; //!< Color attachment references.
+		uint8_t numColorAttachments;                 //!< Number of color attachment references.
+		uint8_t depthStencilAttachment;              //!< Depth/stencil attachment index, or `UINT8_MAX`.
+	};
+
+	/// Frame buffer description with optional subpasses.
+	///
+	/// When `numSubpasses` is zero this is equivalent to
+	/// `createFrameBuffer(numAttachments, attachments, destroyTextures)` and keeps the
+	/// single-pass fast path. When subpasses are declared, views select the subpass they render
+	/// into with `setViewSubpass`.
+	///
+	/// @attention Only Vulkan currently supports subpasses. See `BGFX_CAPS_SUBPASS`.
+	///
+	/// @attention C99's equivalent binding is `bgfx_frame_buffer_desc_t`.
+	///
+	struct FrameBufferDesc
+	{
+		const Attachment* attachments; //!< Render target attachments.
+		uint8_t numAttachments;        //!< Number of render target attachments.
+		const Subpass* subpasses;      //!< Subpass descriptions. Can be `NULL` when `numSubpasses` is zero.
+		uint8_t numSubpasses;          //!< Number of subpasses.
+		bool destroyTextures;          //!< If true, textures will be destroyed when the frame buffer is destroyed.
+	};
+
 	/// Transform data.
 	///
 	/// @attention C99's equivalent binding is `bgfx_transform_t`.
@@ -3853,6 +3907,18 @@ namespace bgfx
 		, bool _destroyTexture = false
 		);
 
+	/// Create a frame buffer from a description with optional subpasses.
+	///
+	/// @param[in] _desc Frame buffer description. See: `bgfx::FrameBufferDesc`.
+	///
+	/// @returns Frame buffer handle.
+	///
+	/// @attention Availability depends on: `BGFX_CAPS_SUBPASS` when subpasses are declared.
+	///
+	/// @attention C99's equivalent binding is `bgfx_create_frame_buffer_desc`.
+	///
+	FrameBufferHandle createFrameBuffer(const FrameBufferDesc& _desc);
+
 	/// Create a frame buffer for a window, from a full swap chain description.
 	///
 	/// @param[in] _desc Swap chain description. See: `bgfx::SwapChain`.
@@ -4302,6 +4368,23 @@ namespace bgfx
 	void setViewFrameBuffer(
 		  ViewId _id
 		, FrameBufferHandle _handle
+		);
+
+	/// Set view subpass.
+	///
+	/// Views rendering into the same subpass frame buffer must be submitted in increasing
+	/// subpass order. A view can share a subpass with earlier views.
+	///
+	/// @param[in] _id View id.
+	/// @param[in] _subpass Subpass index declared by `bgfx::FrameBufferDesc`.
+	///
+	/// @attention Availability depends on: `BGFX_CAPS_SUBPASS`.
+	///
+	/// @attention C99's equivalent binding is `bgfx_set_view_subpass`.
+	///
+	void setViewSubpass(
+		  ViewId _id
+		, uint8_t _subpass
 		);
 
 	/// Set view's view matrix and projection matrix,

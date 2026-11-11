@@ -576,16 +576,17 @@ enum CapFlags: CapFlags_{
 	primitiveID            = 0x0000_0000_0000_0800, ///PrimitiveID is available in fragment shader.
 	rendererMultithreaded  = 0x0000_0000_0000_1000, ///Renderer is on separate thread.
 	shaderF16              = 0x0000_0000_0000_2000, ///16-bit floats are supported in shaders.
-	swapChain              = 0x0000_0000_0000_4000, ///Multiple windows are supported.
-	textureCubeArray       = 0x0000_0000_0000_8000, ///Cubemap texture array is supported.
-	textureDirectAccess    = 0x0000_0000_0001_0000, ///CPU direct access to GPU texture memory.
-	textureExternal        = 0x0000_0000_0002_0000, ///External texture is supported.
-	textureExternalShared  = 0x0000_0000_0004_0000, ///External shared texture is supported.
-	transparentBackbuffer  = 0x0000_0000_0008_0000, ///Transparent back buffer supported.
-	variableRateShading    = 0x0000_0000_0010_0000, ///Variable Rate Shading
-	vertexAttribUint10     = 0x0000_0000_0020_0000, ///Vertex attribute 10_10_10_2 is supported.
-	videoDecode            = 0x0000_0000_0040_0000, ///Hardware video decode is supported.
-	viewportLayerArray     = 0x0000_0000_0080_0000, ///Viewport layer is available in vertex shader.
+	subpass                = 0x0000_0000_0000_4000, ///Multiple subpasses and input attachments are supported.
+	swapChain              = 0x0000_0000_0000_8000, ///Multiple windows are supported.
+	textureCubeArray       = 0x0000_0000_0001_0000, ///Cubemap texture array is supported.
+	textureDirectAccess    = 0x0000_0000_0002_0000, ///CPU direct access to GPU texture memory.
+	textureExternal        = 0x0000_0000_0004_0000, ///External texture is supported.
+	textureExternalShared  = 0x0000_0000_0008_0000, ///External shared texture is supported.
+	transparentBackbuffer  = 0x0000_0000_0010_0000, ///Transparent back buffer supported.
+	variableRateShading    = 0x0000_0000_0020_0000, ///Variable Rate Shading
+	vertexAttribUint10     = 0x0000_0000_0040_0000, ///Vertex attribute 10_10_10_2 is supported.
+	videoDecode            = 0x0000_0000_0080_0000, ///Hardware video decode is supported.
+	viewportLayerArray     = 0x0000_0000_0100_0000, ///Viewport layer is available in vertex shader.
 }
 
 alias CapsFormat_ = uint;
@@ -1771,6 +1772,57 @@ extern(C++, "bgfx") struct Attachment{
 		];
 		return ret;
 	}()));
+}
+
+/**
+Subpass attachment reference.
+
+Attachment indices refer to `FrameBufferDesc::attachments`.
+
+@attention `resolve` is only used by color attachment references. It names the
+  single-sampled attachment receiving the resolved MSAA image for that color attachment.
+
+*/
+extern(C++, "bgfx") struct AttachmentReference{
+	ubyte attachment; ///Attachment index. Use `UINT8_MAX` for an unused slot.
+	ubyte resolve; ///Resolve attachment index. Use `UINT8_MAX` when no resolve is needed.
+}
+
+/**
+Subpass description.
+
+Input attachments are read in the current subpass with the shader binding
+convention documented by `SUBPASS_INPUT` in `bgfx_shader.sh`. The input attachment
+index used by the shader must match the array position in `inputAttachments`.
+
+@attention Only Vulkan currently supports this. See `BGFX_CAPS_SUBPASS`.
+
+*/
+extern(C++, "bgfx") struct Subpass{
+	const(AttachmentReference)* inputAttachments; ///Input attachment references.
+	ubyte numInputAttachments; ///Number of input attachment references.
+	const(AttachmentReference)* colorAttachments; ///Color attachment references.
+	ubyte numColorAttachments; ///Number of color attachment references.
+	ubyte depthStencilAttachment; ///Depth/stencil attachment index, or `UINT8_MAX`.
+}
+
+/**
+Frame buffer description with optional subpasses.
+
+When `numSubpasses` is zero this is equivalent to
+`createFrameBuffer(numAttachments, attachments, destroyTextures)` and keeps the
+single-pass fast path. When subpasses are declared, views select the subpass they render
+into with `setViewSubpass`.
+
+@attention Only Vulkan currently supports subpasses. See `BGFX_CAPS_SUBPASS`.
+
+*/
+extern(C++, "bgfx") struct FrameBufferDesc{
+	const(Attachment)* attachments; ///Render target attachments.
+	ubyte numAttachments; ///Number of render target attachments.
+	const(Subpass)* subpasses; ///Subpass descriptions. Can be `NULL` when `numSubpasses` is zero.
+	ubyte numSubpasses; ///Number of subpasses.
+	bool destroyTextures; ///If true, textures will be destroyed when the frame buffer is destroyed.
 }
 
 ///Transform data.
@@ -3569,6 +3621,16 @@ mixin(joinFnBinds((){
 		{q{FrameBufferHandle}, q{createFrameBuffer}, q{ubyte num, const(Attachment)* attachment, bool destroyTexture=false}, ext: `C++, "bgfx"`},
 		
 		/**
+		* Create a frame buffer from a description with optional subpasses.
+		* 
+		* Attention: Availability depends on: `BGFX_CAPS_SUBPASS` when subpasses are declared.
+		* 
+		Params:
+			desc = Frame buffer description. See: `bgfx::FrameBufferDesc`.
+		*/
+		{q{FrameBufferHandle}, q{createFrameBuffer}, q{ref const FrameBufferDesc desc}, ext: `C++, "bgfx"`},
+		
+		/**
 		* Create a frame buffer for a window, from a full swap chain description.
 		* 
 		* Remarks:
@@ -3896,6 +3958,20 @@ mixin(joinFnBinds((){
 		default back buffer.
 		*/
 		{q{void}, q{setViewFrameBuffer}, q{ViewID id, FrameBufferHandle handle}, ext: `C++, "bgfx"`},
+		
+		/**
+		* Set view subpass.
+		* 
+		* Views rendering into the same subpass frame buffer must be submitted in increasing
+		* subpass order. A view can share a subpass with earlier views.
+		* 
+		* Attention: Availability depends on: `BGFX_CAPS_SUBPASS`.
+		* 
+		Params:
+			id = View id.
+			subpass = Subpass index declared by `bgfx::FrameBufferDesc`.
+		*/
+		{q{void}, q{setViewSubpass}, q{ViewID id, ubyte subpass}, ext: `C++, "bgfx"`},
 		
 		/**
 		* Set view's view matrix and projection matrix,

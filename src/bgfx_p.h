@@ -3158,6 +3158,16 @@ namespace bgfx
 		bool m_window;
 	};
 
+	struct SubpassDesc
+	{
+		AttachmentReference m_input[BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
+		AttachmentReference m_color[BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
+		uint8_t m_numInput;
+		uint8_t m_numColor;
+		uint8_t m_depthStencil;
+		uint8_t m_pad;
+	};
+
 	struct DepthControl
 	{
 		int32_t m_constant;
@@ -3240,6 +3250,7 @@ namespace bgfx
 			setClear(BGFX_CLEAR_NONE, 0, 0.0f, 0);
 			setShadingRate(ShadingRate::Rate1x1);
 			setFrameBuffer(BGFX_INVALID_HANDLE);
+			setSubpass(0);
 			setTransform(NULL, NULL);
 			setDepthBias(0, 0.0f, 0.0f);
 			setSampleMask(UINT32_MAX);
@@ -3305,6 +3316,11 @@ namespace bgfx
 			m_fbh = _handle;
 		}
 
+		void setSubpass(uint8_t _subpass)
+		{
+			m_subpass = _subpass;
+		}
+
 		void setTransform(const void* _view, const void* _proj)
 		{
 			if (NULL != _view)
@@ -3333,6 +3349,7 @@ namespace bgfx
 		Matrix4 m_view;
 		Matrix4 m_proj;
 		FrameBufferHandle m_fbh;
+		uint8_t m_subpass;
 		uint16_t m_nameIdx;
 		uint8_t m_shadingRate;
 		uint8_t m_mode;
@@ -6007,6 +6024,11 @@ namespace bgfx
 		virtual uintptr_t getInternal(TextureHandle _handle) = 0;
 		virtual void destroyTexture(TextureHandle _handle) = 0;
 		virtual void createFrameBuffer(FrameBufferHandle _handle, uint8_t _num, const Attachment* _attachment) = 0;
+		virtual void createFrameBuffer(FrameBufferHandle _handle, uint8_t _num, const Attachment* _attachment, uint8_t _numSubpasses, const SubpassDesc* _subpasses)
+		{
+			BX_UNUSED(_numSubpasses, _subpasses);
+			createFrameBuffer(_handle, _num, _attachment);
+		}
 		virtual void createFrameBuffer(FrameBufferHandle _handle, const SwapChain& _desc) = 0;
 
 		virtual void resizeFrameBuffer(FrameBufferHandle _handle, const SwapChain& _desc)
@@ -8205,6 +8227,169 @@ namespace bgfx
 			return handle;
 		}
 
+		BGFX_API_FUNC(FrameBufferHandle createFrameBuffer(const FrameBufferDesc& _desc) )
+		{
+			BGFX_MUTEX_SCOPE(m_resourceApiLock);
+
+			BGFX_CHECK_CAPS(0 == _desc.numSubpasses || !!(g_caps.supported & BGFX_CAPS_SUBPASS)
+				, "Subpasses are not supported!"
+				);
+
+			const uint8_t numAttachments = _desc.numAttachments;
+			const uint8_t numSubpasses   = _desc.numSubpasses;
+
+			BX_ASSERT(NULL != _desc.attachments && 0 < numAttachments
+				, "Frame buffer must have at least one attachment."
+				);
+			BX_ASSERT(numSubpasses <= BGFX_CONFIG_MAX_SUBPASSES
+				, "Number of subpasses is larger than allowed %d (max: %d)."
+				, numSubpasses
+				, BGFX_CONFIG_MAX_SUBPASSES
+				);
+
+			if (0 < numSubpasses)
+			{
+				BX_ASSERT(NULL != _desc.subpasses, "Subpass descriptions are NULL.");
+
+				for (uint8_t ii = 0; ii < numSubpasses; ++ii)
+				{
+					const Subpass& sp = _desc.subpasses[ii];
+
+					BX_ASSERT(sp.numInputAttachments <= BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS
+						, "Subpass %d has too many input attachments (%d)."
+						, ii
+						, sp.numInputAttachments
+						);
+					BX_ASSERT(sp.numColorAttachments <= BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS
+						, "Subpass %d has too many color attachments (%d)."
+						, ii
+						, sp.numColorAttachments
+						);
+					BX_ASSERT(0 == sp.numInputAttachments || NULL != sp.inputAttachments
+						, "Subpass %d input attachment references are NULL."
+						, ii
+						);
+					BX_ASSERT(0 == sp.numColorAttachments || NULL != sp.colorAttachments
+						, "Subpass %d color attachment references are NULL."
+						, ii
+						);
+
+					for (uint8_t jj = 0; jj < sp.numInputAttachments; ++jj)
+					{
+						BX_ASSERT(sp.inputAttachments[jj].attachment < numAttachments
+							, "Subpass %d input attachment %d index %d is out of range."
+							, ii
+							, jj
+							, sp.inputAttachments[jj].attachment
+							);
+					}
+
+					for (uint8_t jj = 0; jj < sp.numColorAttachments; ++jj)
+					{
+						const AttachmentReference& ref = sp.colorAttachments[jj];
+
+						BX_ASSERT(ref.attachment < numAttachments
+							, "Subpass %d color attachment %d index %d is out of range."
+							, ii
+							, jj
+							, ref.attachment
+							);
+						BX_ASSERT(UINT8_MAX == ref.resolve || ref.resolve < numAttachments
+							, "Subpass %d resolve attachment %d index %d is out of range."
+							, ii
+							, jj
+							, ref.resolve
+							);
+					}
+
+					BX_ASSERT(UINT8_MAX == sp.depthStencilAttachment || sp.depthStencilAttachment < numAttachments
+						, "Subpass %d depth/stencil attachment index %d is out of range."
+						, ii
+						, sp.depthStencilAttachment
+						);
+				}
+			}
+
+			bx::ErrorAssert err;
+			isFrameBufferValid(numAttachments, _desc.attachments, &err);
+
+			if (!err.isOk() )
+			{
+				return BGFX_INVALID_HANDLE;
+			}
+
+			FrameBufferHandle handle = { m_frameBufferHandle.alloc() };
+			BX_WARN(isValid(handle), "Failed to allocate frame buffer handle.");
+
+			if (!isValid(handle) )
+			{
+				return handle;
+			}
+
+			SubpassDesc subpasses[BGFX_CONFIG_MAX_SUBPASSES];
+			bx::memSet(subpasses, 0, sizeof(subpasses) );
+
+			for (uint8_t ii = 0; ii < numSubpasses; ++ii)
+			{
+				const Subpass& sp = _desc.subpasses[ii];
+				SubpassDesc& desc = subpasses[ii];
+
+				desc.m_numInput = sp.numInputAttachments;
+				desc.m_numColor = sp.numColorAttachments;
+				desc.m_depthStencil = sp.depthStencilAttachment;
+
+				for (uint8_t jj = 0; jj < sp.numInputAttachments; ++jj)
+				{
+					desc.m_input[jj].attachment = sp.inputAttachments[jj].attachment;
+					desc.m_input[jj].resolve    = UINT8_MAX;
+				}
+
+				for (uint8_t jj = 0; jj < sp.numColorAttachments; ++jj)
+				{
+					desc.m_color[jj] = sp.colorAttachments[jj];
+				}
+			}
+
+			CommandBuffer& cmdbuf = getCommandBuffer(CommandBuffer::CreateFrameBuffer);
+			cmdbuf.write(handle);
+			cmdbuf.write(uint8_t(2) ); // subpass frame buffer
+			cmdbuf.write(numAttachments);
+
+			const TextureRef& firstTexture = m_textureRef[_desc.attachments[0].handle.idx];
+			const BackbufferRatio::Enum bbRatio = BackbufferRatio::Enum(firstTexture.m_bbRatio);
+
+			FrameBufferRef& fbr = m_frameBufferRef.alloc(handle.idx);
+			if (BackbufferRatio::Count == bbRatio)
+			{
+				fbr.m_width  = bx::max<uint16_t>(firstTexture.m_width  >> _desc.attachments[0].mip, 1);
+				fbr.m_height = bx::max<uint16_t>(firstTexture.m_height >> _desc.attachments[0].mip, 1);
+			}
+
+			fbr.m_window = false;
+			bx::memSet(fbr.un.m_th, 0xff, sizeof(fbr.un.m_th) );
+
+			for (uint32_t ii = 0; ii < numAttachments; ++ii)
+			{
+				TextureHandle texHandle = _desc.attachments[ii].handle;
+				fbr.un.m_th[ii] = texHandle;
+				textureIncRef(texHandle);
+			}
+
+			cmdbuf.write(_desc.attachments, sizeof(Attachment) * numAttachments);
+			cmdbuf.write(numSubpasses);
+			cmdbuf.write(subpasses, sizeof(SubpassDesc) * numSubpasses);
+
+			if (_desc.destroyTextures)
+			{
+				for (uint32_t ii = 0; ii < numAttachments; ++ii)
+				{
+					textureTakeOwnership(_desc.attachments[ii].handle);
+				}
+			}
+
+			return handle;
+		}
+
 		static void writeSwapChain(CommandBuffer& _cmdbuf, const FrameBufferRef& _fbr)
 		{
 			_cmdbuf.write(_fbr.m_swapChain);
@@ -8724,6 +8909,16 @@ namespace bgfx
 		{
 			BGFX_CHECK_HANDLE_INVALID_OK("setViewFrameBuffer", m_frameBufferHandle, _handle);
 			m_view[_id].setFrameBuffer(_handle);
+		}
+
+		BGFX_API_FUNC(void setViewSubpass(ViewId _id, uint8_t _subpass) )
+		{
+			BX_ASSERT(_subpass <= BGFX_CONFIG_MAX_SUBPASSES
+				, "Invalid subpass index %d (max: %d)."
+				, _subpass
+				, BGFX_CONFIG_MAX_SUBPASSES
+				);
+			m_view[_id].setSubpass(_subpass);
 		}
 
 		BGFX_API_FUNC(void setViewTransform(ViewId _id, const void* _view, const void* _proj) )

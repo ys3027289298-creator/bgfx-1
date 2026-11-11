@@ -529,6 +529,7 @@ VK_DESTROY_FUNC(DescriptorSet);
 			Buffer,
 			Image,
 			Sampler,
+			InputAttachment,
 
 			Count
 		};
@@ -541,6 +542,7 @@ VK_DESTROY_FUNC(DescriptorSet);
 		uint32_t binding;
 		uint32_t samplerBinding;
 		uint32_t index;
+		uint16_t inputAttachmentIndex;
 	};
 
 	struct TextureBindInfo
@@ -613,6 +615,7 @@ VK_DESTROY_FUNC(DescriptorSet);
 		TextureBindInfo m_textures[BGFX_CONFIG_MAX_TEXTURE_SAMPLERS];
 		uint8_t m_numTextures;
 		uint32_t m_msaaMask;
+		uint32_t m_inputAttachmentMask;
 
 		PredefinedUniform m_predefined[PredefinedUniform::Count * 2];
 		uint8_t m_numPredefined;
@@ -897,6 +900,7 @@ VK_DESTROY_FUNC(DescriptorSet);
 			, m_denseIdx(kInvalidHandle)
 			, m_num(0)
 			, m_numTh(0)
+			, m_numSubpasses(0)
 			, m_nwh(NULL)
 			, m_needPresent(false)
 			, m_needResolve(false)
@@ -905,7 +909,7 @@ VK_DESTROY_FUNC(DescriptorSet);
 		{
 		}
 
-		void create(uint8_t _num, const Attachment* _attachment);
+		void create(uint8_t _num, const Attachment* _attachment, uint8_t _numSubpasses = 0, const SubpassDesc* _subpass = NULL);
 		VkResult create(uint16_t _denseIdx, const SwapChain& _desc);
 		uint16_t destroy();
 
@@ -917,6 +921,7 @@ VK_DESTROY_FUNC(DescriptorSet);
 		VkRenderPass getRenderPass(uint16_t _clearFlags) const;
 
 		void resolve();
+		void updateTextureLayouts();
 
 		bool acquire(VkCommandBuffer _commandBuffer, bool _block = true);
 		void present();
@@ -937,7 +942,14 @@ VK_DESTROY_FUNC(DescriptorSet);
 		uint16_t m_denseIdx;
 		uint8_t  m_num;
 		uint8_t  m_numTh;
+		uint8_t  m_numSubpasses;
 		Attachment m_attachment[BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
+		SubpassDesc m_subpass[BGFX_CONFIG_MAX_SUBPASSES];
+		uint8_t m_colorAttachment[BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
+		uint8_t m_numColorAttachments;
+		uint8_t m_resolveAttachment[BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
+		VkImageLayout m_initialLayout[BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
+		VkImageLayout m_finalLayout[BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
 
 		SwapChainVK m_swapChain;
 		void* m_nwh;

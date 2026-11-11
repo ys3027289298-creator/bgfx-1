@@ -3236,6 +3236,11 @@ VK_IMPORT_DEVICE
 			m_frameBuffers.alloc(_handle.idx).create(_num, _attachment);
 		}
 
+		void createFrameBuffer(FrameBufferHandle _handle, uint8_t _num, const Attachment* _attachment, uint8_t _numSubpasses, const SubpassDesc* _subpasses) override
+		{
+			m_frameBuffers.alloc(_handle.idx).create(_num, _attachment, _numSubpasses, _subpasses);
+		}
+
 		void createFrameBuffer(FrameBufferHandle _handle, const SwapChain& _desc) override
 		{
 			for (uint32_t ii = 0, num = m_numWindows; ii < num; ++ii)
@@ -3955,28 +3960,45 @@ VK_IMPORT_DEVICE
 					return;
 				}
 
-				for (uint8_t ii = 0, num = newFrameBuffer.m_num; ii < num; ++ii)
+				if (0 < newFrameBuffer.m_numSubpasses)
 				{
-					TextureVK& texture = m_textures[newFrameBuffer.m_texture[ii].idx];
-					texture.setState(
-						  m_commandBuffer
-						, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-						);
-				}
-
-				if (isValid(newFrameBuffer.m_depth) )
-				{
-					TextureVK& texture = m_textures[newFrameBuffer.m_depth.idx];
-					const VkImageLayout layout = getDepthAttachmentLayout(
-						  texture.m_aspectFlags
-						, newFrameBuffer.m_attachment[newFrameBuffer.m_num].flags
-						);
-
-					texture.setState(m_commandBuffer, layout);
-
-					if (isReadOnlyDepthStencilLayout(layout) )
+					for (uint8_t ii = 0; ii < newFrameBuffer.m_numTh; ++ii)
 					{
-						m_readOnlyDepthLayout = layout;
+						TextureVK& texture = m_textures[newFrameBuffer.m_attachment[ii].handle.idx];
+						const VkImageLayout layout = newFrameBuffer.m_initialLayout[ii];
+						texture.setState(m_commandBuffer, layout);
+
+						if (isReadOnlyDepthStencilLayout(layout) )
+						{
+							m_readOnlyDepthLayout = layout;
+						}
+					}
+				}
+				else
+				{
+					for (uint8_t ii = 0, num = newFrameBuffer.m_num; ii < num; ++ii)
+					{
+						TextureVK& texture = m_textures[newFrameBuffer.m_texture[ii].idx];
+						texture.setState(
+							  m_commandBuffer
+							, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+							);
+					}
+
+					if (isValid(newFrameBuffer.m_depth) )
+					{
+						TextureVK& texture = m_textures[newFrameBuffer.m_depth.idx];
+						const VkImageLayout layout = getDepthAttachmentLayout(
+							  texture.m_aspectFlags
+							, newFrameBuffer.m_attachment[newFrameBuffer.m_num].flags
+							);
+
+						texture.setState(m_commandBuffer, layout);
+
+						if (isReadOnlyDepthStencilLayout(layout) )
+						{
+							m_readOnlyDepthLayout = layout;
+						}
 					}
 				}
 			}
@@ -4053,7 +4075,10 @@ VK_IMPORT_DEVICE
 			const FrameBufferVK& frameBuffer = getFrameBuffer(m_fbh);
 
 			const uint32_t numAttachments = NULL == frameBuffer.m_nwh
-				? frameBuffer.m_num
+				? (0 < frameBuffer.m_numSubpasses
+					? frameBuffer.m_subpass[m_currentSubpass].m_numColor
+					: frameBuffer.m_num
+					)
 				: 1
 				;
 
@@ -4269,7 +4294,385 @@ VK_IMPORT_DEVICE
 			}
 		}
 
-		VkResult getRenderPass(uint8_t _num, const VkFormat* _formats, const VkImageAspectFlags* _aspects, const bool* _resolve, VkSampleCountFlagBits _samples, uint16_t _clearFlags, uint8_t _depthFlags, ::VkRenderPass* _outRenderPass, uint32_t* _outHashKey)
+		VkResult getRenderPassSubpass(
+			  uint8_t _num
+			, const VkFormat* _formats
+			, const VkImageAspectFlags* _aspects
+			, VkSampleCountFlagBits _samples
+			, uint16_t _clearFlags
+			, uint8_t _depthFlags
+			, uint8_t _numSubpasses
+			, const SubpassDesc* _subpass
+			, uint32_t _hashKey
+			, ::VkRenderPass* _outRenderPass
+			)
+		{
+			enum
+			{
+				kUseColor   = 0x01,
+				kUseDepth   = 0x02,
+				kUseInput   = 0x04,
+				kUseResolve = 0x08,
+				kUseWrite   = kUseColor|kUseDepth|kUseResolve,
+			};
+
+			VkAttachmentDescription ad[BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
+			bx::memSet(ad, 0, sizeof(ad) );
+
+			VkAttachmentReference inputAr[BGFX_CONFIG_MAX_SUBPASSES][BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
+			VkAttachmentReference colorAr[BGFX_CONFIG_MAX_SUBPASSES][BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
+			VkAttachmentReference resolveAr[BGFX_CONFIG_MAX_SUBPASSES][BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
+			VkAttachmentReference depthAr[BGFX_CONFIG_MAX_SUBPASSES];
+			VkSubpassDescription sd[BGFX_CONFIG_MAX_SUBPASSES];
+			bx::memSet(sd, 0, sizeof(sd) );
+
+			uint8_t useMask[BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS][BGFX_CONFIG_MAX_SUBPASSES];
+			bx::memSet(useMask, 0, sizeof(useMask) );
+
+			uint8_t resolveTarget[BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
+			bx::memSet(resolveTarget, 0, sizeof(resolveTarget) );
+
+			const VkPipelineStageFlags graphicsStages = 0
+				| VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT
+				| VK_PIPELINE_STAGE_VERTEX_INPUT_BIT
+				| VK_PIPELINE_STAGE_VERTEX_SHADER_BIT
+				| VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+				| VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
+				| VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT
+				| VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+				;
+
+			const VkPipelineStageFlags outsideStages = 0
+				| graphicsStages
+				| VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+				| VK_PIPELINE_STAGE_TRANSFER_BIT
+				;
+
+			auto inputLayout = [&](uint8_t _attachment) -> VkImageLayout
+			{
+				const VkImageAspectFlags aspects = _aspects[_attachment];
+				if (0 != (aspects & VK_IMAGE_ASPECT_COLOR_BIT) )
+				{
+					return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				}
+
+				if (0 != (aspects & VK_IMAGE_ASPECT_DEPTH_BIT)
+				&&  0 != (aspects & VK_IMAGE_ASPECT_STENCIL_BIT) )
+				{
+					return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+				}
+
+				return 0 != (aspects & VK_IMAGE_ASPECT_DEPTH_BIT)
+					? VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL
+					: VK_IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL
+					;
+			};
+
+			auto usageStageAccess = [&](uint8_t _use, VkPipelineStageFlags& _stage, VkAccessFlags& _access)
+			{
+				_stage  = 0;
+				_access = 0;
+
+				if (0 != (_use & kUseInput) )
+				{
+					_stage  |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+					_access |= VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
+				}
+
+				if (0 != (_use & (kUseColor|kUseResolve) ) )
+				{
+					_stage  |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+					_access |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+				}
+
+				if (0 != (_use & kUseDepth) )
+				{
+					_stage  |= 0
+						| VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
+						| VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT
+						| VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+						;
+					_access |= 0
+						| VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+						| VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+						;
+				}
+			};
+
+			for (uint8_t ii = 0; ii < _numSubpasses; ++ii)
+			{
+				const SubpassDesc& sp = _subpass[ii];
+
+				sd[ii].flags             = 0;
+				sd[ii].pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+
+				sd[ii].inputAttachmentCount = sp.m_numInput;
+				sd[ii].pInputAttachments    = 0 < sp.m_numInput ? &inputAr[ii][0] : NULL;
+
+				for (uint8_t jj = 0; jj < sp.m_numInput; ++jj)
+				{
+					const uint8_t attachment = sp.m_input[jj].attachment;
+
+					inputAr[ii][jj].attachment = attachment;
+					inputAr[ii][jj].layout     = inputLayout(attachment);
+					useMask[attachment][ii] |= kUseInput;
+				}
+
+				sd[ii].colorAttachmentCount = sp.m_numColor;
+				sd[ii].pColorAttachments    = 0 < sp.m_numColor ? &colorAr[ii][0] : NULL;
+
+				bool hasResolve = false;
+				for (uint8_t jj = 0; jj < sp.m_numColor; ++jj)
+				{
+					const AttachmentReference& ref = sp.m_color[jj];
+					const uint8_t attachment = ref.attachment;
+
+					colorAr[ii][jj].attachment = attachment;
+					colorAr[ii][jj].layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+					useMask[attachment][ii]   |= kUseColor;
+
+					resolveAr[ii][jj].attachment = VK_ATTACHMENT_UNUSED;
+					resolveAr[ii][jj].layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+					if (UINT8_MAX != ref.resolve)
+					{
+						hasResolve = true;
+						resolveAr[ii][jj].attachment = ref.resolve;
+						resolveTarget[ref.resolve] = 1;
+						useMask[ref.resolve][ii] |= kUseResolve;
+					}
+				}
+
+				sd[ii].pResolveAttachments = hasResolve ? &resolveAr[ii][0] : NULL;
+
+				depthAr[ii].attachment = VK_ATTACHMENT_UNUSED;
+				depthAr[ii].layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+				sd[ii].pDepthStencilAttachment = NULL;
+
+				if (UINT8_MAX != sp.m_depthStencil)
+				{
+					const uint8_t attachment = sp.m_depthStencil;
+					depthAr[ii].attachment = attachment;
+					depthAr[ii].layout     = getDepthAttachmentLayout(_aspects[attachment], _depthFlags);
+					sd[ii].pDepthStencilAttachment = &depthAr[ii];
+					useMask[attachment][ii] |= kUseDepth;
+				}
+			}
+
+			for (uint8_t ii = 0; ii < _num; ++ii)
+			{
+				uint8_t firstKind = 0;
+				uint8_t lastKind  = 0;
+				uint8_t firstSubpass = UINT8_MAX;
+				uint8_t lastSubpass  = UINT8_MAX;
+				VkImageLayout firstLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+				VkImageLayout lastLayout  = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+				for (uint8_t jj = 0; jj < _numSubpasses; ++jj)
+				{
+					if (0 != useMask[ii][jj])
+					{
+						if (UINT8_MAX == firstSubpass)
+						{
+							firstSubpass = jj;
+							firstKind    = useMask[ii][jj];
+						}
+						lastSubpass = jj;
+						lastKind    = useMask[ii][jj];
+					}
+				}
+
+				if (UINT8_MAX != firstSubpass)
+				{
+					firstLayout = 0 != (firstKind & kUseInput)
+						? inputLayout(ii)
+						: 0 != (firstKind & (kUseColor|kUseResolve) )
+							? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+							: getDepthAttachmentLayout(_aspects[ii], _depthFlags)
+							;
+					lastLayout = 0 != (lastKind & kUseInput)
+						? inputLayout(ii)
+						: 0 != (lastKind & (kUseColor|kUseResolve) )
+							? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+							: getDepthAttachmentLayout(_aspects[ii], _depthFlags)
+							;
+				}
+
+				VkAttachmentDescription& desc = ad[ii];
+				desc.flags          = 0;
+				desc.format         = _formats[ii];
+				desc.samples        = resolveTarget[ii] ? VK_SAMPLE_COUNT_1_BIT : _samples;
+				desc.loadOp         = VK_ATTACHMENT_LOAD_OP_LOAD;
+				desc.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+				desc.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+				desc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+				desc.initialLayout  = firstLayout;
+				desc.finalLayout    = lastLayout;
+
+				if (resolveTarget[ii])
+				{
+					desc.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+				}
+				else if (0 != (firstKind & kUseInput) )
+				{
+					desc.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+				}
+				else if (0 != (firstKind & (kUseColor|kUseResolve) ) )
+				{
+					desc.loadOp = 0 != (_clearFlags & BGFX_CLEAR_COLOR)
+						? VK_ATTACHMENT_LOAD_OP_CLEAR
+						: VK_ATTACHMENT_LOAD_OP_LOAD
+						;
+					desc.storeOp = BGFX_CLEAR_NONE != (_clearFlags & (BGFX_CLEAR_DISCARD_COLOR_0 << ii) )
+						? VK_ATTACHMENT_STORE_OP_DONT_CARE
+						: VK_ATTACHMENT_STORE_OP_STORE
+						;
+				}
+				else if (0 != (firstKind & kUseDepth) )
+				{
+					desc.loadOp         = 0 != (_clearFlags & BGFX_CLEAR_DEPTH)   ? VK_ATTACHMENT_LOAD_OP_CLEAR      : VK_ATTACHMENT_LOAD_OP_LOAD;
+					desc.storeOp        = 0 != (_clearFlags & BGFX_CLEAR_DISCARD_DEPTH)   ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
+					desc.stencilLoadOp  = 0 != (_clearFlags & BGFX_CLEAR_STENCIL) ? VK_ATTACHMENT_LOAD_OP_CLEAR      : VK_ATTACHMENT_LOAD_OP_LOAD;
+					desc.stencilStoreOp = 0 != (_clearFlags & BGFX_CLEAR_DISCARD_STENCIL) ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
+				}
+			}
+
+			VkSubpassDependency dep[BGFX_CONFIG_MAX_SUBPASSES * BGFX_CONFIG_MAX_SUBPASSES + 2];
+			uint32_t numDeps = 0;
+
+			VkPipelineStageFlags firstStage = graphicsStages;
+			VkAccessFlags firstAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+			VkPipelineStageFlags lastStage = graphicsStages;
+			VkAccessFlags lastAccess = VK_ACCESS_MEMORY_WRITE_BIT;
+
+			for (uint8_t ii = 0; ii < _num; ++ii)
+			{
+				for (uint8_t jj = 0; jj < _numSubpasses; ++jj)
+				{
+					const uint8_t use = useMask[ii][jj];
+					if (0 == use)
+					{
+						continue;
+					}
+
+					if (0 == jj)
+					{
+						VkPipelineStageFlags stage;
+						VkAccessFlags access;
+						usageStageAccess(use, stage, access);
+						firstStage  |= stage;
+						firstAccess |= access;
+					}
+
+					if (_numSubpasses - 1 == jj)
+					{
+						VkPipelineStageFlags stage;
+						VkAccessFlags access;
+						usageStageAccess(use, stage, access);
+						lastStage  |= stage;
+						lastAccess |= access;
+					}
+				}
+			}
+
+			dep[numDeps++] =
+			{
+				.srcSubpass      = VK_SUBPASS_EXTERNAL,
+				.dstSubpass      = 0,
+				.srcStageMask    = outsideStages,
+				.dstStageMask    = firstStage,
+				.srcAccessMask   = VK_ACCESS_MEMORY_WRITE_BIT,
+				.dstAccessMask   = firstAccess,
+				.dependencyFlags = 0,
+			};
+
+			for (uint8_t ii = 0; ii < _numSubpasses; ++ii)
+			{
+				for (uint8_t jj = uint8_t(ii + 1); jj < _numSubpasses; ++jj)
+				{
+					VkPipelineStageFlags srcStage = 0;
+					VkAccessFlags srcAccess = 0;
+					VkPipelineStageFlags dstStage = 0;
+					VkAccessFlags dstAccess = 0;
+					bool needed = false;
+
+					for (uint8_t kk = 0; kk < _num; ++kk)
+					{
+						const uint8_t srcUse = useMask[kk][ii];
+						const uint8_t dstUse = useMask[kk][jj];
+
+						if (0 != srcUse && 0 != dstUse)
+						{
+							needed = true;
+
+							VkPipelineStageFlags stage;
+							VkAccessFlags access;
+							usageStageAccess(srcUse, stage, access);
+							srcStage  |= stage;
+							srcAccess |= access;
+
+							usageStageAccess(dstUse, stage, access);
+							dstStage  |= stage;
+							dstAccess |= access;
+						}
+					}
+
+					if (needed
+					&&  (0 != (srcAccess & (VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT|VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT) )
+					  || 0 != (dstAccess & (VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT|VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT) ) ) )
+					{
+						dep[numDeps++] =
+						{
+							.srcSubpass      = ii,
+							.dstSubpass      = jj,
+							.srcStageMask    = srcStage,
+							.dstStageMask    = dstStage,
+							.srcAccessMask   = srcAccess,
+							.dstAccessMask   = dstAccess,
+							.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT,
+						};
+					}
+				}
+			}
+
+			dep[numDeps++] =
+			{
+				.srcSubpass      = uint8_t(_numSubpasses - 1),
+				.dstSubpass      = VK_SUBPASS_EXTERNAL,
+				.srcStageMask    = lastStage,
+				.dstStageMask    = outsideStages,
+				.srcAccessMask   = lastAccess,
+				.dstAccessMask   = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+				.dependencyFlags = 0,
+			};
+
+			VkRenderPassCreateInfo rpi;
+			rpi.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+			rpi.pNext           = NULL;
+			rpi.flags           = 0;
+			rpi.attachmentCount = _num;
+			rpi.pAttachments    = ad;
+			rpi.subpassCount    = _numSubpasses;
+			rpi.pSubpasses      = sd;
+			rpi.dependencyCount = numDeps;
+			rpi.pDependencies   = dep;
+
+			VkRenderPass renderPass;
+			VkResult result = vkCreateRenderPass(m_device, &rpi, m_allocatorCb, &renderPass);
+
+			if (VK_SUCCESS != result)
+			{
+				BX_TRACE("Create subpass render pass error: vkCreateRenderPass failed %d: %s.", result, getName(result) );
+				return result;
+			}
+
+			m_renderPassCache.add(_hashKey, renderPass);
+			*_outRenderPass = renderPass;
+
+			return result;
+		}
+
+		VkResult getRenderPass(uint8_t _num, const VkFormat* _formats, const VkImageAspectFlags* _aspects, const bool* _resolve, VkSampleCountFlagBits _samples, uint16_t _clearFlags, uint8_t _depthFlags, ::VkRenderPass* _outRenderPass, uint32_t* _outHashKey, uint8_t _numSubpasses = 0, const SubpassDesc* _subpass = NULL)
 		{
 			VkResult result = VK_SUCCESS;
 
@@ -4288,6 +4691,11 @@ VK_IMPORT_DEVICE
 			{
 				hash.add(_resolve, sizeof(bool) * _num);
 			}
+			if (0 < _numSubpasses)
+			{
+				hash.add(_numSubpasses);
+				hash.add(_subpass, sizeof(SubpassDesc) * _numSubpasses);
+			}
 			uint32_t hashKey = hash.end();
 
 			if (NULL != _outHashKey)
@@ -4301,6 +4709,22 @@ VK_IMPORT_DEVICE
 			{
 				*_outRenderPass = renderPass;
 				return result;
+			}
+
+			if (0 < _numSubpasses)
+			{
+				return getRenderPassSubpass(
+					  _num
+					, _formats
+					, _aspects
+					, _samples
+					, _clearFlags
+					, _depthFlags
+					, _numSubpasses
+					, _subpass
+					, hashKey
+					, _outRenderPass
+					);
 			}
 
 			VkAttachmentDescription ad[BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS * 2];
@@ -4450,7 +4874,7 @@ VK_IMPORT_DEVICE
 			return result;
 		}
 
-		VkResult getRenderPass(uint8_t _num, const Attachment* _attachments, uint16_t _clearFlags, ::VkRenderPass* _outRenderPass, uint32_t* _outHashKey = NULL)
+		VkResult getRenderPass(uint8_t _num, const Attachment* _attachments, uint16_t _clearFlags, ::VkRenderPass* _outRenderPass, uint32_t* _outHashKey = NULL, uint8_t _numSubpasses = 0, const SubpassDesc* _subpass = NULL)
 		{
 			VkFormat formats[BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
 			VkImageAspectFlags aspects[BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
@@ -4462,7 +4886,10 @@ VK_IMPORT_DEVICE
 				const TextureVK& texture = m_textures[_attachments[ii].handle.idx];
 				formats[ii] = texture.getViewFormat(_attachments[ii].flags, BGFX_ATTACHMENT_SRGB);
 				aspects[ii] = texture.m_aspectFlags;
-				samples = texture.m_sampler.Sample;
+				samples = 0 < _numSubpasses
+					? (samples < texture.m_sampler.Sample ? texture.m_sampler.Sample : samples)
+					: texture.m_sampler.Sample
+					;
 
 				if (0 != (texture.m_aspectFlags & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) ) )
 				{
@@ -4470,7 +4897,7 @@ VK_IMPORT_DEVICE
 				}
 			}
 
-			return getRenderPass(_num, formats, aspects, NULL, samples, _clearFlags, depthFlags, _outRenderPass, _outHashKey);
+			return getRenderPass(_num, formats, aspects, NULL, samples, _clearFlags, depthFlags, _outRenderPass, _outHashKey, _numSubpasses, _subpass);
 		}
 
 		VkResult getRenderPass(const SwapChainVK& swapChain, uint16_t _clearFlags, ::VkRenderPass* _outRenderPass, uint32_t* _outHashKey = NULL)
@@ -5412,6 +5839,50 @@ VK_IMPORT_DEVICE
 				const Binding& bind = _renderBind.m_bind[stage];
 				const BindInfo& bindInfo = _program.m_bindInfo[stage];
 
+				if (BindType::InputAttachment == bindInfo.type)
+				{
+					const FrameBufferVK& frameBuffer = getFrameBuffer(m_fbh);
+
+					if (!frameBuffer.isSwapChain()
+					&&  m_currentSubpass < frameBuffer.m_numSubpasses
+					&&  bindInfo.inputAttachmentIndex < frameBuffer.m_subpass[m_currentSubpass].m_numInput)
+					{
+						const uint8_t attachment = frameBuffer.m_subpass[m_currentSubpass].m_input[bindInfo.inputAttachmentIndex].attachment;
+						const TextureVK& texture = m_textures[frameBuffer.m_attachment[attachment].handle.idx];
+						const VkImageLayout layout = 0 != (texture.m_aspectFlags & VK_IMAGE_ASPECT_COLOR_BIT)
+							? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+							: VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+							;
+
+						wds[wdsCount].sType            = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+						wds[wdsCount].pNext            = NULL;
+						wds[wdsCount].dstSet           = descriptorSet;
+						wds[wdsCount].dstBinding       = bindInfo.binding;
+						wds[wdsCount].dstArrayElement  = 0;
+						wds[wdsCount].descriptorCount  = 1;
+						wds[wdsCount].descriptorType   = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+						wds[wdsCount].pImageInfo       = &imageInfo[imageCount];
+						wds[wdsCount].pBufferInfo      = NULL;
+						wds[wdsCount].pTexelBufferView = NULL;
+
+						imageInfo[imageCount].imageLayout = layout;
+						imageInfo[imageCount].sampler     = VK_NULL_HANDLE;
+						imageInfo[imageCount].imageView   = frameBuffer.m_textureImageViews[attachment];
+						++imageCount;
+						++wdsCount;
+					}
+					else
+					{
+						BX_WARN(false
+							, "Input attachment %d is not available in subpass %d."
+							, bindInfo.inputAttachmentIndex
+							, m_currentSubpass
+							);
+					}
+
+					continue;
+				}
+
 				if (kInvalidHandle != bind.m_idx
 				&&  isValid(bindInfo.uniformHandle) )
 				{
@@ -6290,6 +6761,7 @@ VK_IMPORT_DEVICE
 		uint8_t m_vsScratch[64<<10];
 
 		FrameBufferHandle m_fbh;
+		uint8_t           m_currentSubpass = 0;
 		VkImageLayout     m_readOnlyDepthLayout;
 	};
 
@@ -6914,6 +7386,7 @@ VK_DESTROY
 			m_bindInfo[ii].binding        = 0;
 			m_bindInfo[ii].samplerBinding = 0;
 			m_bindInfo[ii].index          = UINT32_MAX;
+			m_bindInfo[ii].inputAttachmentIndex = UINT16_MAX;
 		}
 
 		if (0 < count)
@@ -7033,14 +7506,26 @@ VK_DESTROY
 							: kSpirvBindShift;
 
 						const uint16_t stage = regIndex - reverseShift; // regIndex is used for image/sampler binding index
+						const bool inputAttachment = kTextureComponentSubpass == texComponent;
 
 						const UniformRegInfo* info = s_renderVK->m_uniformReg.find(name);
-						BX_ASSERT(NULL != info, "User defined uniform '%s' is not found, it won't be set.", name);
+						if (inputAttachment)
+						{
+							m_bindInfo[stage].uniformHandle        = NULL != info ? info->m_handle : UniformHandle{ kInvalidHandle };
+							m_bindInfo[stage].type                 = BindType::InputAttachment;
+							m_bindInfo[stage].binding              = regIndex;
+							m_bindInfo[stage].samplerBinding       = 0;
+							m_bindInfo[stage].inputAttachmentIndex = texFormat;
+						}
+						else
+						{
+							BX_ASSERT(NULL != info, "User defined uniform '%s' is not found, it won't be set.", name);
 
-						m_bindInfo[stage].uniformHandle    = info->m_handle;
-						m_bindInfo[stage].type             = BindType::Sampler;
-						m_bindInfo[stage].binding          = regIndex;
-						m_bindInfo[stage].samplerBinding   = regIndex + kSpirvSamplerShift;
+							m_bindInfo[stage].uniformHandle    = info->m_handle;
+							m_bindInfo[stage].type             = BindType::Sampler;
+							m_bindInfo[stage].binding          = regIndex;
+							m_bindInfo[stage].samplerBinding   = regIndex + kSpirvSamplerShift;
+						}
 
 						const VkImageViewType viewType = hasTexData
 							? textureDimensionToViewType(idToTextureDimension(texDimension) )
@@ -7062,7 +7547,7 @@ VK_DESTROY
 							m_numTextures++;
 						}
 
-						kind = "sampler";
+						kind = inputAttachment ? "subpass input" : "sampler";
 					}
 					else
 					{
@@ -7217,6 +7702,18 @@ VK_DESTROY
 				}
 				break;
 
+				case BindType::InputAttachment:
+				{
+					VkDescriptorSetLayoutBinding& binding = m_bindings[bidx];
+					binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+					binding.descriptorType = VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
+					binding.binding = m_bindInfo[ii].binding;
+					binding.pImmutableSamplers = NULL;
+					binding.descriptorCount = 1;
+					bidx++;
+				}
+				break;
+
 				default:
 					break;
 			}
@@ -7267,6 +7764,7 @@ VK_DESTROY
 
 		m_numTextures = 0;
 		m_msaaMask    = 0;
+		m_inputAttachmentMask = 0;
 
 		for (uint8_t stage = 0; stage < BX_COUNTOF(m_bindInfo); ++stage)
 		{
@@ -7277,22 +7775,30 @@ VK_DESTROY
 				.binding        = 0,
 				.samplerBinding = 0,
 				.index          = UINT32_MAX,
+				.inputAttachmentIndex = UINT16_MAX,
 			};
 
 			const ShaderVK* shader = NULL;
-			if (isValid(m_vsh->m_bindInfo[stage].uniformHandle) )
+			const auto hasBinding = [](const BindInfo& _bindInfo)
+			{
+				return BindType::Count != _bindInfo.type
+					&& (isValid(_bindInfo.uniformHandle) || BindType::InputAttachment == _bindInfo.type)
+					;
+			};
+
+			if (hasBinding(m_vsh->m_bindInfo[stage]) )
 			{
 				shader = _vsh;
 
 				BX_ASSERT(false
 					  || NULL == m_fsh
-					  || !isValid(m_fsh->m_bindInfo[stage].uniformHandle)
+					  || !hasBinding(m_fsh->m_bindInfo[stage])
 					  || !(m_vsh->m_oldBindingModel || m_fsh->m_oldBindingModel)
 					, "Shared vertex/fragment bindings require shader binary version >= 11."
 					);
 			}
 			else if (NULL != m_fsh
-				 &&  isValid(m_fsh->m_bindInfo[stage].uniformHandle) )
+				 &&  hasBinding(m_fsh->m_bindInfo[stage]) )
 			{
 				shader = _fsh;
 			}
@@ -7300,6 +7806,10 @@ VK_DESTROY
 			if (NULL != shader)
 			{
 				m_bindInfo[stage] = shader->m_bindInfo[stage];
+				if (BindType::InputAttachment == m_bindInfo[stage].type)
+				{
+					m_inputAttachmentMask |= UINT32_C(1) << stage;
+				}
 				uint32_t& index = m_bindInfo[stage].index;
 				if (UINT32_MAX != index)
 				{
@@ -10788,13 +11298,15 @@ VK_DESTROY
 		layout = newLayout;
 	}
 
-	void FrameBufferVK::create(uint8_t _num, const Attachment* _attachment)
+	void FrameBufferVK::create(uint8_t _num, const Attachment* _attachment, uint8_t _numSubpasses, const SubpassDesc* _subpass)
 	{
 		BGFX_PROFILER_SCOPE("FrameBufferVK::create", kColorFrame);
 
 		m_numTh = _num;
+		m_numSubpasses = _numSubpasses;
 
 		uint8_t num = 0;
+		uint8_t attachmentMap[BGFX_CONFIG_MAX_FRAME_BUFFER_ATTACHMENTS];
 
 		for (uint8_t ii = 0; ii < _num; ++ii)
 		{
@@ -10802,6 +11314,7 @@ VK_DESTROY
 
 			if (0 == (texture.m_aspectFlags & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) ) )
 			{
+				attachmentMap[ii] = num;
 				m_attachment[num++] = _attachment[ii];
 			}
 		}
@@ -10812,7 +11325,58 @@ VK_DESTROY
 
 			if (0 != (texture.m_aspectFlags & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) ) )
 			{
+				attachmentMap[ii] = num;
 				m_attachment[num++] = _attachment[ii];
+			}
+		}
+
+		m_numColorAttachments = 0;
+		for (uint8_t ii = 0; ii < m_numTh; ++ii)
+		{
+			const TextureVK& texture = s_renderVK->m_textures[m_attachment[ii].handle.idx];
+			if (0 != (texture.m_aspectFlags & VK_IMAGE_ASPECT_COLOR_BIT) )
+			{
+				m_colorAttachment[m_numColorAttachments++] = ii;
+			}
+		}
+
+		bx::memSet(m_resolveAttachment, 0, sizeof(m_resolveAttachment) );
+
+		for (uint8_t ii = 0; ii < _numSubpasses; ++ii)
+		{
+			SubpassDesc& dst = m_subpass[ii];
+			const SubpassDesc& src = _subpass[ii];
+
+			bx::memSet(&dst, 0, sizeof(dst) );
+			dst.m_numInput = src.m_numInput;
+			dst.m_numColor = src.m_numColor;
+			dst.m_depthStencil = UINT8_MAX == src.m_depthStencil
+				? UINT8_MAX
+				: attachmentMap[src.m_depthStencil]
+				;
+
+			for (uint8_t jj = 0; jj < src.m_numInput; ++jj)
+			{
+				dst.m_input[jj].attachment = attachmentMap[src.m_input[jj].attachment];
+				dst.m_input[jj].resolve    = UINT8_MAX;
+			}
+
+			for (uint8_t jj = 0; jj < src.m_numColor; ++jj)
+			{
+				const AttachmentReference& ref = src.m_color[jj];
+				AttachmentReference& dstRef = dst.m_color[jj];
+
+				dstRef.attachment = attachmentMap[ref.attachment];
+				dstRef.resolve    = UINT8_MAX == ref.resolve
+					? UINT8_MAX
+					: attachmentMap[ref.resolve]
+					;
+
+				if (UINT8_MAX != dstRef.resolve)
+				{
+					m_resolveAttachment[dstRef.resolve] = 1;
+					m_resolveAttachment[dstRef.attachment] = 0;
+				}
 			}
 		}
 
@@ -10853,7 +11417,15 @@ VK_DESTROY
 
 		if (m_numTh > 0)
 		{
-			VK_CHECK(s_renderVK->getRenderPass(m_numTh, m_attachment, _clearFlags, &renderPass) );
+			VK_CHECK(s_renderVK->getRenderPass(
+				  m_numTh
+				, m_attachment
+				, _clearFlags
+				, &renderPass
+				, NULL
+				, m_numSubpasses
+				, m_subpass
+				) );
 		}
 		else
 		{
@@ -10887,7 +11459,15 @@ VK_DESTROY
 			const VkDevice device = s_renderVK->m_device;
 			const VkAllocationCallbacks* allocatorCb = s_renderVK->m_allocatorCb;
 
-			VK_CHECK(s_renderVK->getRenderPass(m_numTh, m_attachment, 0, &m_renderPass, &m_renderPassHashKey) );
+			VK_CHECK(s_renderVK->getRenderPass(
+				  m_numTh
+				, m_attachment
+				, 0
+				, &m_renderPass
+				, &m_renderPassHashKey
+				, m_numSubpasses
+				, m_subpass
+				) );
 
 			m_depth = BGFX_INVALID_HANDLE;
 			m_num = 0;
@@ -10916,6 +11496,78 @@ VK_DESTROY
 				else if (texture.m_aspectFlags & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT) )
 				{
 					m_depth = at.handle;
+				}
+			}
+
+			if (0 < m_numSubpasses)
+			{
+				for (uint8_t ii = 0; ii < m_numTh; ++ii)
+				{
+					const TextureVK& texture = s_renderVK->m_textures[m_attachment[ii].handle.idx];
+					const VkImageAspectFlags aspects = texture.m_aspectFlags;
+					const uint8_t depthFlags = m_attachment[ii].flags;
+
+					VkImageLayout first = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+					VkImageLayout last  = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+					bool firstSet = false;
+					bool lastSet  = false;
+
+					for (uint8_t jj = 0; jj < m_numSubpasses; ++jj)
+					{
+						const SubpassDesc& sp = m_subpass[jj];
+						uint8_t use = 0;
+
+						for (uint8_t kk = 0; kk < sp.m_numInput; ++kk)
+						{
+							if (ii == sp.m_input[kk].attachment)
+							{
+								use |= 0x04;
+							}
+						}
+
+						for (uint8_t kk = 0; kk < sp.m_numColor; ++kk)
+						{
+							if (ii == sp.m_color[kk].attachment)
+							{
+								use |= 0x01;
+							}
+							if (UINT8_MAX != sp.m_color[kk].resolve
+							&&  ii == sp.m_color[kk].resolve)
+							{
+								use |= 0x08;
+							}
+						}
+
+						if (UINT8_MAX != sp.m_depthStencil
+						&&  ii == sp.m_depthStencil)
+						{
+							use |= 0x02;
+						}
+
+						if (0 != use)
+						{
+							const VkImageLayout layout = 0 != (use & 0x04)
+								? (0 != (aspects & VK_IMAGE_ASPECT_COLOR_BIT)
+									? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+									: VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+									)
+								: 0 != (use & (0x01|0x08) )
+									? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+									: getDepthAttachmentLayout(aspects, depthFlags)
+									;
+
+							if (!firstSet)
+							{
+								first = layout;
+								firstSet = true;
+							}
+							last = layout;
+							lastSet = true;
+						}
+					}
+
+					m_initialLayout[ii] = firstSet ? first : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+					m_finalLayout[ii]   = lastSet  ? last  : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 				}
 			}
 
@@ -10990,6 +11642,20 @@ VK_DESTROY
 		}
 
 		m_needResolve = false;
+	}
+
+	void FrameBufferVK::updateTextureLayouts()
+	{
+		if (0 == m_numSubpasses)
+		{
+			return;
+		}
+
+		for (uint8_t ii = 0; ii < m_numTh; ++ii)
+		{
+			TextureVK& texture = s_renderVK->m_textures[m_attachment[ii].handle.idx];
+			texture.m_currentImageLayout = m_finalLayout[ii];
+		}
 	}
 
 	uint16_t FrameBufferVK::destroy()
@@ -12779,6 +13445,11 @@ VK_DESTROY
 						hash.add(currentSbo.buffer);
 						hash.add(vsSize);
 						hash.add(fsSize);
+						if (0 != program.m_inputAttachmentMask)
+						{
+							hash.add(m_fbh.idx);
+							hash.add(m_currentSubpass);
+						}
 
 						if (VK_IMAGE_LAYOUT_UNDEFINED != m_readOnlyDepthLayout)
 						{

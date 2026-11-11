@@ -602,6 +602,14 @@ BGFX_C_API bgfx_frame_buffer_handle_t bgfx_create_frame_buffer_from_attachment(u
 	return handle_ret.c;
 }
 
+BGFX_C_API bgfx_frame_buffer_handle_t bgfx_create_frame_buffer_desc(const bgfx_frame_buffer_desc_t* _desc)
+{
+	const bgfx::FrameBufferDesc& desc = *(const bgfx::FrameBufferDesc*)_desc;
+	union { bgfx_frame_buffer_handle_t c; bgfx::FrameBufferHandle cpp; } handle_ret;
+	handle_ret.cpp = bgfx::createFrameBuffer(desc);
+	return handle_ret.c;
+}
+
 BGFX_C_API bgfx_frame_buffer_handle_t bgfx_create_frame_buffer_from_swap_chain(const bgfx_swap_chain_t* _desc)
 {
 	const bgfx::SwapChain& desc = *(const bgfx::SwapChain*)_desc;
@@ -747,6 +755,11 @@ BGFX_C_API void bgfx_set_view_frame_buffer(bgfx_view_id_t _id, bgfx_frame_buffer
 {
 	union { bgfx_frame_buffer_handle_t c; bgfx::FrameBufferHandle cpp; } handle = { _handle };
 	bgfx::setViewFrameBuffer((bgfx::ViewId)_id, handle.cpp);
+}
+
+BGFX_C_API void bgfx_set_view_subpass(bgfx_view_id_t _id, uint8_t _subpass)
+{
+	bgfx::setViewSubpass((bgfx::ViewId)_id, _subpass);
 }
 
 BGFX_C_API void bgfx_set_view_transform(bgfx_view_id_t _id, const void* _view, const void* _proj)
@@ -1565,6 +1578,7 @@ BGFX_C_API bgfx_interface_vtbl_t* bgfx_get_interface(uint32_t _version)
 			bgfx_create_frame_buffer_scaled,
 			bgfx_create_frame_buffer_from_handles,
 			bgfx_create_frame_buffer_from_attachment,
+			bgfx_create_frame_buffer_desc,
 			bgfx_create_frame_buffer_from_swap_chain,
 			bgfx_update_swap_chain,
 			bgfx_set_frame_buffer_name,
@@ -1590,6 +1604,7 @@ BGFX_C_API bgfx_interface_vtbl_t* bgfx_get_interface(uint32_t _version)
 			bgfx_set_view_clear_mrt,
 			bgfx_set_view_mode,
 			bgfx_set_view_frame_buffer,
+			bgfx_set_view_subpass,
 			bgfx_set_view_transform,
 			bgfx_set_view_order,
 			bgfx_set_view_shading_rate,

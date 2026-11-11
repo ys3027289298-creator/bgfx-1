@@ -1151,54 +1151,59 @@ public static class bgfx
 		ShaderF16              = 0x0000000000002000,
 	
 		/// <summary>
+		/// Multiple subpasses and input attachments are supported.
+		/// </summary>
+		Subpass                = 0x0000000000004000,
+	
+		/// <summary>
 		/// Multiple windows are supported.
 		/// </summary>
-		SwapChain              = 0x0000000000004000,
+		SwapChain              = 0x0000000000008000,
 	
 		/// <summary>
 		/// Cubemap texture array is supported.
 		/// </summary>
-		TextureCubeArray       = 0x0000000000008000,
+		TextureCubeArray       = 0x0000000000010000,
 	
 		/// <summary>
 		/// CPU direct access to GPU texture memory.
 		/// </summary>
-		TextureDirectAccess    = 0x0000000000010000,
+		TextureDirectAccess    = 0x0000000000020000,
 	
 		/// <summary>
 		/// External texture is supported.
 		/// </summary>
-		TextureExternal        = 0x0000000000020000,
+		TextureExternal        = 0x0000000000040000,
 	
 		/// <summary>
 		/// External shared texture is supported.
 		/// </summary>
-		TextureExternalShared  = 0x0000000000040000,
+		TextureExternalShared  = 0x0000000000080000,
 	
 		/// <summary>
 		/// Transparent back buffer supported.
 		/// </summary>
-		TransparentBackbuffer  = 0x0000000000080000,
+		TransparentBackbuffer  = 0x0000000000100000,
 	
 		/// <summary>
 		/// Variable Rate Shading
 		/// </summary>
-		VariableRateShading    = 0x0000000000100000,
+		VariableRateShading    = 0x0000000000200000,
 	
 		/// <summary>
 		/// Vertex attribute 10_10_10_2 is supported.
 		/// </summary>
-		VertexAttribUint10     = 0x0000000000200000,
+		VertexAttribUint10     = 0x0000000000400000,
 	
 		/// <summary>
 		/// Hardware video decode is supported.
 		/// </summary>
-		VideoDecode            = 0x0000000000400000,
+		VideoDecode            = 0x0000000000800000,
 	
 		/// <summary>
 		/// Viewport layer is available in vertex shader.
 		/// </summary>
-		ViewportLayerArray     = 0x0000000000800000,
+		ViewportLayerArray     = 0x0000000001000000,
 	}
 	
 	[AllowDuplicates]
@@ -2933,6 +2938,33 @@ public static class bgfx
 	}
 	
 	[CRepr]
+	public struct AttachmentReference
+	{
+		public uint8 attachment;
+		public uint8 resolve;
+	}
+	
+	[CRepr]
+	public struct Subpass
+	{
+		public AttachmentReference* inputAttachments;
+		public uint8 numInputAttachments;
+		public AttachmentReference* colorAttachments;
+		public uint8 numColorAttachments;
+		public uint8 depthStencilAttachment;
+	}
+	
+	[CRepr]
+	public struct FrameBufferDesc
+	{
+		public Attachment* attachments;
+		public uint8 numAttachments;
+		public Subpass* subpasses;
+		public uint8 numSubpasses;
+		public uint8 destroyTextures;
+	}
+	
+	[CRepr]
 	public struct Transform
 	{
 		public float* data;
@@ -4198,6 +4230,18 @@ public static class bgfx
 	public static extern FrameBufferHandle create_frame_buffer_from_attachment(uint8 _num, Attachment* _attachment, bool _destroyTexture);
 	
 	/// <summary>
+	/// Create a frame buffer from a description with optional subpasses.
+	/// 
+	/// @attention Availability depends on: `BGFX_CAPS_SUBPASS` when subpasses are declared.
+	/// 
+	/// </summary>
+	///
+	/// <param name="_desc">Frame buffer description. See: `bgfx::FrameBufferDesc`.</param>
+	///
+	[LinkName("bgfx_create_frame_buffer_desc")]
+	public static extern FrameBufferHandle create_frame_buffer_desc(FrameBufferDesc* _desc);
+	
+	/// <summary>
 	/// Create a frame buffer for a window, from a full swap chain description.
 	/// 
 	/// @remarks
@@ -4562,6 +4606,22 @@ public static class bgfx
 	///
 	[LinkName("bgfx_set_view_frame_buffer")]
 	public static extern void set_view_frame_buffer(ViewId _id, FrameBufferHandle _handle);
+	
+	/// <summary>
+	/// Set view subpass.
+	/// 
+	/// Views rendering into the same subpass frame buffer must be submitted in increasing
+	/// subpass order. A view can share a subpass with earlier views.
+	/// 
+	/// @attention Availability depends on: `BGFX_CAPS_SUBPASS`.
+	/// 
+	/// </summary>
+	///
+	/// <param name="_id">View id.</param>
+	/// <param name="_subpass">Subpass index declared by `bgfx::FrameBufferDesc`.</param>
+	///
+	[LinkName("bgfx_set_view_subpass")]
+	public static extern void set_view_subpass(ViewId _id, uint8 _subpass);
 	
 	/// <summary>
 	/// Set view's view matrix and projection matrix,
